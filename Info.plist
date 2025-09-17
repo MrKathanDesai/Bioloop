@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Bioloop needs access to your health data to provide personalized fitness insights, recovery scores, and health recommendations based on your activity patterns, heart rate variability, sleep quality, and other biometric data.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Bioloop may update your health data to provide more accurate insights and recommendations for your fitness journey.</string>
+	<key>NSLocalizedDescription</key>
+	<string>Localisation required</string>
+</dict>
+</plist>
