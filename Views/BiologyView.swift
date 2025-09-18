@@ -224,7 +224,7 @@ struct BiologyView: View {
                 value: dataManager.latestVO2Max ?? 0,
                 history: dataManager.vo2MaxSeries,
                 userAge: 30, // Default age - could be enhanced to calculate from birth date
-                hasData: dataManager.hasRecentVO2Max
+                hasData: dataManager.hasDisplayableVO2Max
             )
                             .offset(y: cardAppearStates[0] ? 0 : 12)
                         
@@ -233,7 +233,7 @@ struct BiologyView: View {
                 HRVCard(
                     currentValue: dataManager.latestHRV ?? 0,
                     history: dataManager.hrvSeries,
-                    hasData: dataManager.hasRecentHRV
+                    hasData: dataManager.hasDisplayableHRV
                 )
                                 .offset(y: cardAppearStates[1] ? 0 : 12)
                             
@@ -241,7 +241,7 @@ struct BiologyView: View {
                 RestingHeartRateCard(
                     currentValue: dataManager.latestRHR ?? 0,
                     history: dataManager.rhrSeries,
-                    hasData: dataManager.hasRecentRHR
+                    hasData: dataManager.hasDisplayableRHR
                 )
                                 .offset(y: cardAppearStates[2] ? 0 : 12)
                         }
@@ -251,7 +251,7 @@ struct BiologyView: View {
                 currentWeight: dataManager.latestWeight ?? 0,
                 history: dataManager.weightSeries,
                 height: 175, // Default height in cm - could be enhanced to fetch from HealthKit
-                hasData: dataManager.hasRecentWeight
+                hasData: dataManager.hasDisplayableWeight
             )
                             .offset(y: cardAppearStates[3] ? 0 : 12)
                         
@@ -267,7 +267,7 @@ struct BiologyView: View {
                 )
                                 .offset(y: cardAppearStates[4] ? 0 : 12)
                             
-                // Health score summary (only with recent data)
+                // Health score summary (only with recent data - strict 7-day threshold)
                 HealthScoreCard(
                     vo2Max: dataManager.hasRecentVO2Max ? (dataManager.latestVO2Max ?? 0) : 0,
                     hrv: dataManager.hasRecentHRV ? (dataManager.latestHRV ?? 0) : 0,

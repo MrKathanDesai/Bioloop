@@ -282,26 +282,50 @@ final class HealthKitManager: ObservableObject {
     
     // MARK: Historical Sample Fetchers (Apple Health-like behavior)
     
-    /// Fetch all actual samples for a given type in the last N days (no LKV padding)
-    func fetchHistoricalSamples(for type: HKQuantityTypeIdentifier, unit: HKUnit, days: Int = 30) async throws -> [HealthMetricPoint] {
+    /// Fetch historical samples with Apple Health-like behavior (extends beyond 30 days for sparse metrics)
+    func fetchHistoricalSamples(for type: HKQuantityTypeIdentifier, unit: HKUnit, preferredDays: Int = 30) async throws -> [HealthMetricPoint] {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: type) else {
             throw NSError(domain: "HealthKitManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid quantity type"])
         }
         
         let now = Date()
-        guard let startDate = calendar.date(byAdding: .day, value: -days, to: now) else {
+        
+        // For sparse metrics (VO2 Max, HRV, RHR), extend search to 1 year to find samples
+        // For frequent metrics (Weight), use shorter period
+        let searchPeriod: Int = {
+            switch type {
+            case .vo2Max, .heartRateVariabilitySDNN, .restingHeartRate:
+                return 365 // 1 year for sparse Apple Watch metrics
+            case .bodyMass:
+                return 90   // 3 months for manually enterable metrics
+            default:
+                return preferredDays
+            }
+        }()
+        
+        guard let startDate = calendar.date(byAdding: .day, value: -searchPeriod, to: now) else {
             return []
         }
         
-        print("🏥 Fetching historical samples for \(type.rawValue) from \(startDate) to \(now)")
+        print("🏥 Fetching historical samples for \(type.rawValue) from \(startDate) to \(now) (searching \(searchPeriod) days)")
         
         return try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: startDate, end: now, options: .strictEndDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false) // Latest first
+            
+            // For sparse metrics, limit to 50 latest samples; for frequent ones, no limit in date range
+            let sampleLimit: Int = {
+                switch type {
+                case .vo2Max, .heartRateVariabilitySDNN, .restingHeartRate:
+                    return 50 // Latest 50 samples for sparse metrics
+                default:
+                    return HKObjectQueryNoLimit
+                }
+            }()
             
             let query = HKSampleQuery(sampleType: quantityType,
                                     predicate: predicate,
-                                    limit: HKObjectQueryNoLimit,
+                                    limit: sampleLimit,
                                     sortDescriptors: [sortDescriptor]) { _, results, error in
                 if let error = error {
                     print("🏥 Error fetching samples for \(type.rawValue): \(error)")
@@ -310,19 +334,25 @@ final class HealthKitManager: ObservableObject {
                 }
                 
                 guard let samples = results as? [HKQuantitySample] else {
-                    print("🏥 No samples found for \(type.rawValue)")
+                    print("🏥 No samples found for \(type.rawValue) in \(searchPeriod) days")
                     continuation.resume(returning: [])
                     return
                 }
                 
+                // Convert to HealthMetricPoint and sort chronologically for charts
                 let points = samples.map { sample in
                     HealthMetricPoint(
                         date: sample.endDate,
                         value: sample.quantity.doubleValue(for: unit)
                     )
-                }
+                }.sorted { $0.date < $1.date } // Chronological order for charts
                 
                 print("🏥 Found \(points.count) actual samples for \(type.rawValue)")
+                if let latest = points.last {
+                    let daysSinceLatest = Calendar.current.dateComponents([.day], from: latest.date, to: now).day ?? 0
+                    print("🏥 Latest sample for \(type.rawValue): \(latest.value) from \(daysSinceLatest) days ago")
+                }
+                
                 continuation.resume(returning: points)
             }
             

@@ -190,8 +190,10 @@ final class DataManager: ObservableObject {
     @Published var latestWeight: Double? = nil
     @Published var latestWeightDate: Date? = nil
     
-    // Recency threshold for considering data "recent" (30 days)
-    private let recencyThreshold: TimeInterval = 30 * 24 * 60 * 60 // 30 days in seconds
+    // Recency thresholds for different metric types (Apple Health-like)
+    private let recencyThresholdWatch: TimeInterval = 7 * 24 * 60 * 60   // 7 days for Apple Watch metrics
+    private let recencyThresholdManual: TimeInterval = 90 * 24 * 60 * 60 // 90 days for manual metrics
+    private let displayThreshold: TimeInterval = 365 * 24 * 60 * 60      // 1 year for display purposes
     
     /// Get 7-day average RHR
     var averageRHR7Days: Double? {
@@ -221,28 +223,52 @@ final class DataManager: ObservableObject {
     
     // MARK: - Recency Checks (Apple Health-like behavior)
     
-    /// Check if VO2 Max data is recent enough for score computation
+    /// Check if VO2 Max data is recent enough for score computation (7 days for Apple Watch)
     var hasRecentVO2Max: Bool {
         guard let date = latestVO2MaxDate else { return false }
-        return Date().timeIntervalSince(date) <= recencyThreshold
+        return Date().timeIntervalSince(date) <= recencyThresholdWatch
     }
     
-    /// Check if HRV data is recent enough for score computation
+    /// Check if VO2 Max data exists for display (1 year threshold)
+    var hasDisplayableVO2Max: Bool {
+        guard let date = latestVO2MaxDate, let value = latestVO2Max else { return false }
+        return Date().timeIntervalSince(date) <= displayThreshold && value > 0
+    }
+    
+    /// Check if HRV data is recent enough for score computation (7 days for Apple Watch)
     var hasRecentHRV: Bool {
         guard let date = latestHRVDate else { return false }
-        return Date().timeIntervalSince(date) <= recencyThreshold
+        return Date().timeIntervalSince(date) <= recencyThresholdWatch
     }
     
-    /// Check if RHR data is recent enough for score computation
+    /// Check if HRV data exists for display (1 year threshold)
+    var hasDisplayableHRV: Bool {
+        guard let date = latestHRVDate, let value = latestHRV else { return false }
+        return Date().timeIntervalSince(date) <= displayThreshold && value > 0
+    }
+    
+    /// Check if RHR data is recent enough for score computation (7 days for Apple Watch)
     var hasRecentRHR: Bool {
         guard let date = latestRHRDate else { return false }
-        return Date().timeIntervalSince(date) <= recencyThreshold
+        return Date().timeIntervalSince(date) <= recencyThresholdWatch
     }
     
-    /// Check if Weight data is recent enough for display
+    /// Check if RHR data exists for display (1 year threshold)
+    var hasDisplayableRHR: Bool {
+        guard let date = latestRHRDate, let value = latestRHR else { return false }
+        return Date().timeIntervalSince(date) <= displayThreshold && value > 0
+    }
+    
+    /// Check if Weight data is recent enough for display (90 days for manual metrics)
     var hasRecentWeight: Bool {
         guard let date = latestWeightDate else { return false }
-        return Date().timeIntervalSince(date) <= recencyThreshold
+        return Date().timeIntervalSince(date) <= recencyThresholdManual
+    }
+    
+    /// Check if Weight data exists for display (1 year threshold)
+    var hasDisplayableWeight: Bool {
+        guard let date = latestWeightDate, let value = latestWeight else { return false }
+        return Date().timeIntervalSince(date) <= displayThreshold && value > 0
     }
     
     /// Check if we have enough recent data for recovery score computation
