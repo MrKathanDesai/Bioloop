@@ -46,69 +46,9 @@ struct HomeView: View {
                                     )
                                 )
                                 
-                                // Vitals Status Section
-                                VStack(spacing: 16) {
-                                    HStack {
-                                        Text("Health")
-                                            .font(.headline)
-                                        Spacer()
-                                    }
+                                // Health Status Widget (pill track with markers and labels)
+                                HealthStatusWidget()
                                     .padding(.horizontal)
-                                    
-                                    // Show vitals status using existing MetricCard style
-                                    VStack(spacing: 12) {
-                                        HStack(spacing: 20) {
-                                            VitalStatusCard(
-                                                title: "HRV",
-                                                value: DataManager.shared.hasDisplayableHRV ? String(format: "%.1f ms", DataManager.shared.latestHRV!) : "No data",
-                                                isInRange: DataManager.shared.hasRecentHRV && (DataManager.shared.latestHRV ?? 0) > 30,
-                                                icon: "waveform.path.ecg"
-                                            )
-                                            
-                                            VitalStatusCard(
-                                                title: "RHR",
-                                                value: DataManager.shared.hasDisplayableRHR ? String(format: "%.0f bpm", DataManager.shared.latestRHR!) : "No data",
-                                                isInRange: DataManager.shared.hasRecentRHR && (DataManager.shared.latestRHR ?? 0) < 70,
-                                                icon: "heart.fill"
-                                            )
-                                        }
-                                        .padding(.horizontal)
-                                        
-                                        HStack(spacing: 20) {
-                                            VitalStatusCard(
-                                                title: "Resp",
-                                                value: DataManager.shared.todayRespiratoryRate > 0 ? String(format: "%.0f bpm", DataManager.shared.todayRespiratoryRate) : "No data",
-                                                isInRange: DataManager.shared.todayRespiratoryRate > 0 && DataManager.shared.todayRespiratoryRate >= 10 && DataManager.shared.todayRespiratoryRate <= 20,
-                                                icon: "lungs.fill"
-                                            )
-                                            
-                                            VitalStatusCard(
-                                                title: "SpO2",
-                                                value: DataManager.shared.todaySpO2Percent > 0 ? String(format: "%.0f%%", DataManager.shared.todaySpO2Percent) : "No data",
-                                                isInRange: DataManager.shared.todaySpO2Percent >= 95,
-                                                icon: "drop.fill"
-                                            )
-                                        }
-                                        .padding(.horizontal)
-                                        
-                                        HStack(spacing: 20) {
-                                            VitalStatusCard(
-                                                title: "Temp",
-                                                value: DataManager.shared.todayBodyTemperatureC > 0 ? String(format: "%.1f°C", DataManager.shared.todayBodyTemperatureC) : "No data",
-                                                isInRange: DataManager.shared.todayBodyTemperatureC > 0 && DataManager.shared.todayBodyTemperatureC >= 35.5 && DataManager.shared.todayBodyTemperatureC <= 37.8,
-                                                icon: "thermometer"
-                                            )
-                                            
-                                            VitalStatusCard(
-                                                title: "Intake",
-                                                value: DataManager.shared.todayDietaryEnergy > 0 ? String(format: "%.0f kcal", DataManager.shared.todayDietaryEnergy) : "No data",
-                                                isInRange: true,
-                                                icon: "fork.knife"
-                                            )
-                                        }
-                                        .padding(.horizontal)
-                                    }
-                                }
                                 
                                 // Nutrition Section
                                 VStack(spacing: 16) {
@@ -469,6 +409,172 @@ private struct MacroLevelRow: View {
                     .fill(Color.primary.opacity(0.15))
                     .frame(width: 2, height: 14)
                     .offset(x: max(0, min(CGFloat(target/target), 1)) * UIScreen.main.bounds.width * 0.35 - 1)
+            }
+        }
+    }
+}
+
+// MARK: - Health Status Widget
+private struct HealthStatusWidget: View {
+    @StateObject private var dm = DataManager.shared
+
+    private struct Vital: Identifiable {
+        let id = UUID()
+        let title: String
+        let icon: String
+        let hasData: Bool
+        let isOK: Bool
+    }
+
+    private enum VitalState {
+        case ok
+        case warn
+        case missing
+    }
+
+    private var vitals: [Vital] {
+        let hrvHas = dm.hasDisplayableHRV && (dm.latestHRV ?? 0) > 0
+        let rhrHas = dm.hasDisplayableRHR && (dm.latestRHR ?? 0) > 0
+        let respHas = dm.todayRespiratoryRate > 0
+        let spo2Has = dm.todaySpO2Percent > 0
+        let tempHas = dm.todayBodyTemperatureC > 0
+
+        // Range-based evaluation
+        let hrvVal = dm.latestHRV ?? 0
+        let rhrVal = dm.latestRHR ?? 0
+        let respVal = dm.todayRespiratoryRate
+        let spo2Val = dm.todaySpO2Percent
+        let tempVal = dm.todayBodyTemperatureC
+        
+        let hrvOK = hrvHas && dm.hasRecentHRV && (hrvVal >= 30 && hrvVal <= 60)
+        let rhrOK = rhrHas && dm.hasRecentRHR && (rhrVal >= 50 && rhrVal <= 70)
+        let respOK = respHas && (respVal >= 12 && respVal <= 20)
+        let spo2OK = spo2Has && (spo2Val >= 95 && spo2Val <= 100)
+        let tempOK = tempHas && (tempVal >= 36.1 && tempVal <= 37.2)
+        return [
+            Vital(title: "HRV", icon: "waveform.path.ecg", hasData: hrvHas, isOK: hrvOK),
+            Vital(title: "RHR", icon: "heart.circle", hasData: rhrHas, isOK: rhrOK),
+            Vital(title: "Resp", icon: "lungs.fill", hasData: respHas, isOK: respOK),
+            Vital(title: "SpO2", icon: "drop.fill", hasData: spo2Has, isOK: spo2OK),
+            Vital(title: "Temp", icon: "thermometer", hasData: tempHas, isOK: tempOK)
+        ]
+    }
+    
+    private func calculateYOffset(for vital: Vital, index: Int) -> CGFloat {
+        guard vital.hasData else { return 0 } // Center for missing data
+        
+        let maxOffset: CGFloat = 45 // Max distance above/below center
+        let value: Double
+        let minRange: Double
+        let maxRange: Double
+        
+        switch vital.title {
+        case "HRV":
+            value = dm.latestHRV ?? 0
+            minRange = 30
+            maxRange = 60
+            
+        case "RHR":
+            value = dm.latestRHR ?? 0
+            minRange = 50
+            maxRange = 70
+            
+        case "Resp":
+            value = dm.todayRespiratoryRate
+            minRange = 12
+            maxRange = 20
+            
+        case "SpO2":
+            value = dm.todaySpO2Percent
+            minRange = 95
+            maxRange = 100
+            
+        case "Temp":
+            value = dm.todayBodyTemperatureC
+            minRange = 36.1
+            maxRange = 37.2
+            
+        default:
+            return 0
+        }
+        
+        let normalizedPosition = normalizeValue(value, min: minRange, max: maxRange)
+        return CGFloat(normalizedPosition) * maxOffset
+    }
+    
+    private func normalizeValue(_ value: Double, min: Double, max: Double) -> Double {
+        // Returns -1 to 1, where 0 is center of healthy range
+        let center = (min + max) / 2
+        let range = max - min
+        let deviation = (value - center) / (range / 2)
+        return Swift.max(-1, Swift.min(1, -deviation)) // Invert so low values go down
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Health")
+                    .font(.headline)
+                Spacer()
+            }
+            // Track with overlays
+            ZStack {
+                VStack(spacing: 4) {
+                    // Upper limit line
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(.systemGray4))
+                        .frame(height: 6)
+                    
+                    // Green healthy zone
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.green.opacity(0.92), Color.green.opacity(0.75)],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 80)
+                    
+                    // Lower limit line
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(.systemGray4))
+                        .frame(height: 6)
+                }
+                // Markers positioned by value
+                HStack {
+                    ForEach(Array(vitals.enumerated()), id: \.element.id) { index, v in
+                        let state: VitalState = v.hasData ? (v.isOK ? .ok : .warn) : .missing
+                        let yOffset = calculateYOffset(for: v, index: index)
+                        ZStack {
+                            Circle()
+                                .fill(state == .ok ? Color.green : (state == .warn ? Color.red : Color(.systemGray3)))
+                                .frame(width: 32, height: 32)
+                                .shadow(color: state == .ok ? Color.green.opacity(0.6) : (state == .warn ? Color.red.opacity(0.5) : .clear), radius: 8, x: 0, y: 0)
+                            Image(systemName: state == .ok ? "checkmark" : (state == .warn ? "plus" : "xmark"))
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(state == .missing ? .black.opacity(0.8) : .white)
+                        }
+                        .offset(y: yOffset)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+            .padding(.vertical, 2)
+
+            // Labels row
+            HStack {
+                ForEach(vitals) { v in
+                    let state: VitalState = v.hasData ? (v.isOK ? .ok : .warn) : .missing
+                    VStack(spacing: 6) {
+                        Image(systemName: v.icon)
+                            .foregroundColor(state == .ok ? .primary : (state == .warn ? .red : .secondary))
+                        Text(v.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(state == .ok ? .primary : (state == .warn ? .red : .secondary))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             }
         }
     }

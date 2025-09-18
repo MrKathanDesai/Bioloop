@@ -919,11 +919,17 @@ final class HealthKitManager: ObservableObject {
                 }
                 let workouts = (samples as? [HKWorkout]) ?? []
                 let summaries = workouts.map { w in
-                    WorkoutSummary(
+                    let energyBurned: Double
+                    if #available(iOS 18.0, *) {
+                        energyBurned = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+                    } else {
+                        energyBurned = w.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+                    }
+                    return WorkoutSummary(
                         date: w.startDate,
                         type: w.workoutActivityType,
                         durationMinutes: w.duration / 60.0,
-                        energyKilocalories: w.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+                        energyKilocalories: energyBurned
                     )
                 }
                 Task { @MainActor in
