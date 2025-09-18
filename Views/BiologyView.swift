@@ -85,23 +85,7 @@ struct BiologyView: View {
     // Real trend data from HealthKit - now reactive via DataManager (declared above)
     @State private var bodyComposition: BodyCompositionData?
     @State private var userProfile: UserProfile?
-    @State private var selectedTimeWindow: TimeWindow = .thirtyDays
-    
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    
-    enum TimeWindow: String, CaseIterable {
-        case sevenDays = "7d"
-        case fourteenDays = "14d"
-        case thirtyDays = "30d"
-        
-        var days: Int {
-            switch self {
-            case .sevenDays: return 7
-            case .fourteenDays: return 14
-            case .thirtyDays: return 30
-            }
-        }
-    }
     
     var body: some View {
         ScrollView {
@@ -118,10 +102,10 @@ struct BiologyView: View {
                 }
             }
             .padding(.horizontal, BiologySpacing.horizontalPadding)
-            .padding(.top, BiologySpacing.headerTopPadding)
         }
         .background(BiologyColors.bg)
-        .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             FloatingTabBar(selected: .constant(3))
         }
@@ -178,18 +162,6 @@ struct BiologyView: View {
                             .foregroundColor(BiologyColors.subtext)
                     .multilineTextAlignment(.center)
                             .padding(.horizontal, 4)
-            } else {
-                // Time window selector
-                Picker("Time Window", selection: $selectedTimeWindow) {
-                    ForEach(TimeWindow.allCases, id: \.self) { window in
-                        Text(window.rawValue).tag(window)
-                    }
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .frame(maxWidth: 200)
-                .onChange(of: selectedTimeWindow) {
-                    loadHistoricalDataForTimeWindow()
-                }
             }
         }
     }
@@ -381,19 +353,12 @@ struct BiologyView: View {
                 
                 healthData = rawData
                 
-                // Create a simple user profile
-                userProfile = UserProfile(initials: "KD", name: "Katharine Desai")
+                // User profile would be loaded from user settings in a real app
+                userProfile = nil
                 
-                // Calculate body composition from available data (simplified)
-                if let weight = dataManager.latestWeight {
-                    // Use simplified body composition estimates
-                    bodyComposition = BodyCompositionData(
-                        muscle: weight * 0.45, // ~45% muscle mass
-                        fat: weight * 0.15,    // ~15% fat mass  
-                        bone: weight * 0.15,   // ~15% bone mass
-                        water: weight * 0.60   // ~60% water
-                    )
-                }
+                // Body composition would be calculated from real HealthKit data
+                // For now, don't show fake estimates
+                bodyComposition = nil
                 
                 isLoading = false
                 print("🏥 Biology data loaded with latest values:")
@@ -407,18 +372,6 @@ struct BiologyView: View {
     
     // Removed loadHistoricalDataFromDataManager - now using direct reactive binding
     
-    private func loadHistoricalDataForTimeWindow() {
-        print("🏥 Loading historical data for time window: \(selectedTimeWindow.rawValue)")
-        
-        // Data is automatically available through DataManager's reactive properties
-        // No manual loading needed - charts will update automatically
-        print("🏥 Historical data updated for time window \(selectedTimeWindow.rawValue)")
-        print("   Available data points:")
-        print("   VO2 Max: \(dataManager.vo2MaxSeries.count) points")
-        print("   HRV: \(dataManager.hrvSeries.count) points")
-        print("   RHR: \(dataManager.rhrSeries.count) points")
-        print("   Weight: \(dataManager.weightSeries.count) points")
-    }
 }
 
 // MARK: - VO2 Max Card with Percentile Chart

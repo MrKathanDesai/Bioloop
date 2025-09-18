@@ -59,10 +59,9 @@ class JournalViewModel: ObservableObject {
         selectedDate = date
         isLoading = true
 
-        // Simple implementation - in a real app, this would load from CoreData
-        journalEntries = JournalEntry.sampleEntries().filter { entry in
-            Calendar.current.isDate(entry.date, inSameDayAs: date)
-        }
+        // Load real journal entries from persistent storage
+        // For now, start with empty array - user needs to create entries
+        journalEntries = []
 
         isLoading = false
     }
