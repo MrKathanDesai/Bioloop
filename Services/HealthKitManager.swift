@@ -280,6 +280,56 @@ final class HealthKitManager: ObservableObject {
         isLoading = false
     }
     
+    // MARK: Historical Sample Fetchers (Apple Health-like behavior)
+    
+    /// Fetch all actual samples for a given type in the last N days (no LKV padding)
+    func fetchHistoricalSamples(for type: HKQuantityTypeIdentifier, unit: HKUnit, days: Int = 30) async throws -> [HealthMetricPoint] {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: type) else {
+            throw NSError(domain: "HealthKitManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid quantity type"])
+        }
+        
+        let now = Date()
+        guard let startDate = calendar.date(byAdding: .day, value: -days, to: now) else {
+            return []
+        }
+        
+        print("🏥 Fetching historical samples for \(type.rawValue) from \(startDate) to \(now)")
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: now, options: .strictEndDate)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+            
+            let query = HKSampleQuery(sampleType: quantityType,
+                                    predicate: predicate,
+                                    limit: HKObjectQueryNoLimit,
+                                    sortDescriptors: [sortDescriptor]) { _, results, error in
+                if let error = error {
+                    print("🏥 Error fetching samples for \(type.rawValue): \(error)")
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let samples = results as? [HKQuantitySample] else {
+                    print("🏥 No samples found for \(type.rawValue)")
+                    continuation.resume(returning: [])
+                    return
+                }
+                
+                let points = samples.map { sample in
+                    HealthMetricPoint(
+                        date: sample.endDate,
+                        value: sample.quantity.doubleValue(for: unit)
+                    )
+                }
+                
+                print("🏥 Found \(points.count) actual samples for \(type.rawValue)")
+                continuation.resume(returning: points)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+    
     // MARK: Latest Sample Fetchers (immediate data)
     func loadLatestSamples() async {
         print("🏥 Fetching latest samples for immediate display...")
@@ -341,119 +391,54 @@ final class HealthKitManager: ObservableObject {
         }
     }
     
-    // MARK: High-level loader for 30-day biology data
+    // MARK: Apple Health-like biology data loader
     func loadBiology30Days() async {
-        print("🏥 Loading biology data - starting with latest samples...")
+        print("🏥 Loading biology data with Apple Health-like behavior...")
         
-        // First, get the latest samples to ensure we have some data immediately
-        await loadLatestSamples()
-        let now = Date()
-        guard let start = calendar.date(byAdding: .day, value: -29, to: calendar.startOfDay(for: now)) else { return }
-        
-        print("🏥 Loading 30-day biology data from \(start) to \(now)")
-
-        // VO2 Max: use .discreteAverage - Apple stores as ml/kg/min
-        if let vo2Type = HKQuantityType.quantityType(forIdentifier: .vo2Max) {
-            do {
-                let map = try await fetchDailySeries(quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"), startDate: start, endDate: now, options: .discreteAverage)
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"))
-                await MainActor.run {
-                    self.vo2Max30 = filled
-                }
-                print("🏥 VO2 Max 30-day data loaded: \(filled.count) points")
+        // Fetch actual historical samples (no LKV padding)
+        do {
+            // VO2 Max samples
+            let vo2Samples = try await fetchHistoricalSamples(for: .vo2Max, unit: HKUnit(from: "ml/kg·min"))
+            await MainActor.run {
+                self.vo2Max30 = vo2Samples
+            }
+            print("🏥 VO2 Max: \(vo2Samples.count) actual samples")
+            
+            // HRV samples
+            let hrvSamples = try await fetchHistoricalSamples(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli))
+            await MainActor.run {
+                self.hrv30 = hrvSamples
+            }
+            print("🏥 HRV: \(hrvSamples.count) actual samples")
+            
+            // RHR samples
+            let rhrSamples = try await fetchHistoricalSamples(for: .restingHeartRate, unit: HKUnit.count().unitDivided(by: HKUnit.minute()))
+            await MainActor.run {
+                self.rhr30 = rhrSamples
+            }
+            print("🏥 RHR: \(rhrSamples.count) actual samples")
+            
+            // Weight samples
+            let weightSamples = try await fetchHistoricalSamples(for: .bodyMass, unit: HKUnit.gramUnit(with: .kilo))
+            await MainActor.run {
+                self.weight30 = weightSamples
+            }
+            print("🏥 Weight: \(weightSamples.count) actual samples")
+            
         } catch {
-                print("🏥 VO2 Max error: \(error), using LKV fallback")
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"))
-                await MainActor.run {
-                    self.vo2Max30 = filled
-                }
-            }
-        }
-
-        // HRV: fetch latest samples (HRV is stored in ms)
-        if let hrvType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
-            do {
-                let map = try await fetchDailySeries(quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli), startDate: start, endDate: now, options: .discreteAverage)
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli))
-                await MainActor.run {
-                    self.hrv30 = filled
-                }
-                print("🏥 HRV 30-day data loaded: \(filled.count) points")
-            } catch {
-                print("🏥 HRV error: \(error), using LKV fallback")
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli))
+            print("🏥 Error loading historical samples: \(error)")
+            // Initialize with empty arrays if error occurs
             await MainActor.run {
-                    self.hrv30 = filled
-                }
-            }
-        }
-
-        // RHR
-        if let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
-            do {
-                let map = try await fetchDailySeries(quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()), startDate: start, endDate: now, options: .discreteAverage)
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()))
-                await MainActor.run {
-                    self.rhr30 = filled
-                }
-                print("🏥 RHR 30-day data loaded: \(filled.count) points")
-            } catch {
-                print("🏥 RHR error: \(error), using LKV fallback")
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()))
-            await MainActor.run {
-                    self.rhr30 = filled
-                }
-            }
-        }
-
-        // Body Mass (weight)
-        if let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
-            do {
-                let map = try await fetchDailySeries(quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo), startDate: start, endDate: now, options: .discreteAverage)
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo))
-                await MainActor.run {
-                    self.weight30 = filled
-                }
-                print("🏥 Weight 30-day data loaded: \(filled.count) points")
-            } catch {
-                print("🏥 Weight error: \(error), using LKV fallback")
-                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo))
-            await MainActor.run {
-                    self.weight30 = filled
-                }
+                self.vo2Max30 = []
+                self.hrv30 = []
+                self.rhr30 = []
+                self.weight30 = []
             }
         }
         
-        print("🏥 Biology 30-day data loading completed")
+        print("🏥 Biology data loading completed - showing actual samples only")
     }
 
-    // MARK: Helper: fill map with LKV fallback (produces [HealthMetricPoint] array)
-    func fillDailyMapWithLKVIfNeeded(targetDays: Int, startDate: Date, sourceMap: [Date: Double], quantityType: HKQuantityType, unit: HKUnit) async -> [HealthMetricPoint] {
-        var result: [HealthMetricPoint] = []
-        var lastKnown: Double? = nil
-
-        // get last known if needed
-        if let lkv = try? await lastKnownValue(for: quantityType, valueUnit: unit) {
-            lastKnown = lkv.value
-            print("🏥 LKV for \(quantityType.identifier): \(lkv.value) from \(lkv.date)")
-        }
-
-        for i in 0..<targetDays {
-            guard let day = calendar.date(byAdding: .day, value: i, to: startDate) else { continue }
-            let dayStart = calendar.startOfDay(for: day)
-            if let v = sourceMap[dayStart] {
-                result.append(.init(date: day, value: v))
-                lastKnown = v
-            } else if let lkv = lastKnown {
-                // backfill with last known
-                result.append(.init(date: day, value: lkv))
-            } else {
-                // no data & no lkv -> 0 or nil. Use 0 to keep arrays uniform; UI can treat 0 specially.
-                result.append(.init(date: day, value: 0))
-            }
-        }
-        return result
-    }
 
     // MARK: Observers & Anchored queries (incremental updates)
     func startObservers() {

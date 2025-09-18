@@ -37,8 +37,15 @@ final class DataManager: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 VO2 Max series updated: \(series.count) points")
                 self?.vo2MaxSeries = series
-                // Update latest value for Biology tab
-                self?.latestVO2Max = series.last?.value
+                // Update latest value and date for Biology tab (Apple Health-like)
+                if let latest = series.last {
+                    self?.latestVO2Max = latest.value
+                    self?.latestVO2MaxDate = latest.date
+                    print("🔗 Latest VO2 Max: \(latest.value) from \(latest.date)")
+                } else {
+                    self?.latestVO2Max = nil
+                    self?.latestVO2MaxDate = nil
+                }
             }
             .store(in: &cancellables)
 
@@ -47,8 +54,15 @@ final class DataManager: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 HRV series updated: \(series.count) points")
                 self?.hrvSeries = series
-                // Update latest value for Biology tab
-                self?.latestHRV = series.last?.value
+                // Update latest value and date for Biology tab (Apple Health-like)
+                if let latest = series.last {
+                    self?.latestHRV = latest.value
+                    self?.latestHRVDate = latest.date
+                    print("🔗 Latest HRV: \(latest.value) from \(latest.date)")
+                } else {
+                    self?.latestHRV = nil
+                    self?.latestHRVDate = nil
+                }
             }
             .store(in: &cancellables)
 
@@ -57,8 +71,15 @@ final class DataManager: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 RHR series updated: \(series.count) points")
                 self?.rhrSeries = series
-                // Update latest value for Biology tab
-                self?.latestRHR = series.last?.value
+                // Update latest value and date for Biology tab (Apple Health-like)
+                if let latest = series.last {
+                    self?.latestRHR = latest.value
+                    self?.latestRHRDate = latest.date
+                    print("🔗 Latest RHR: \(latest.value) from \(latest.date)")
+                } else {
+                    self?.latestRHR = nil
+                    self?.latestRHRDate = nil
+                }
             }
             .store(in: &cancellables)
 
@@ -67,8 +88,15 @@ final class DataManager: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 Weight series updated: \(series.count) points")
                 self?.weightSeries = series
-                // Update latest value for Biology tab
-                self?.latestWeight = series.last?.value
+                // Update latest value and date for Biology tab (Apple Health-like)
+                if let latest = series.last {
+                    self?.latestWeight = latest.value
+                    self?.latestWeightDate = latest.date
+                    print("🔗 Latest Weight: \(latest.value) from \(latest.date)")
+                } else {
+                    self?.latestWeight = nil
+                    self?.latestWeightDate = nil
+                }
             }
             .store(in: &cancellables)
         
@@ -152,11 +180,18 @@ final class DataManager: ObservableObject {
         await hk.refreshAuthorizationStatus()
     }
     
-    // Latest values for Biology tab (Last Known Values)
+    // Latest values for Biology tab (Last Known Values with recency)
     @Published var latestVO2Max: Double? = nil
+    @Published var latestVO2MaxDate: Date? = nil
     @Published var latestHRV: Double? = nil
+    @Published var latestHRVDate: Date? = nil
     @Published var latestRHR: Double? = nil
+    @Published var latestRHRDate: Date? = nil
     @Published var latestWeight: Double? = nil
+    @Published var latestWeightDate: Date? = nil
+    
+    // Recency threshold for considering data "recent" (30 days)
+    private let recencyThreshold: TimeInterval = 30 * 24 * 60 * 60 // 30 days in seconds
     
     /// Get 7-day average RHR
     var averageRHR7Days: Double? {
@@ -182,5 +217,36 @@ final class DataManager: ObservableObject {
     /// Check if we have today's basic metrics
     var hasTodayData: Bool {
         return todaySteps > 0 || todayHeartRate > 0 || todayActiveEnergy > 0 || todaySleepHours > 0
+    }
+    
+    // MARK: - Recency Checks (Apple Health-like behavior)
+    
+    /// Check if VO2 Max data is recent enough for score computation
+    var hasRecentVO2Max: Bool {
+        guard let date = latestVO2MaxDate else { return false }
+        return Date().timeIntervalSince(date) <= recencyThreshold
+    }
+    
+    /// Check if HRV data is recent enough for score computation
+    var hasRecentHRV: Bool {
+        guard let date = latestHRVDate else { return false }
+        return Date().timeIntervalSince(date) <= recencyThreshold
+    }
+    
+    /// Check if RHR data is recent enough for score computation
+    var hasRecentRHR: Bool {
+        guard let date = latestRHRDate else { return false }
+        return Date().timeIntervalSince(date) <= recencyThreshold
+    }
+    
+    /// Check if Weight data is recent enough for display
+    var hasRecentWeight: Bool {
+        guard let date = latestWeightDate else { return false }
+        return Date().timeIntervalSince(date) <= recencyThreshold
+    }
+    
+    /// Check if we have enough recent data for recovery score computation
+    var canComputeRecoveryScore: Bool {
+        return hasRecentHRV && hasRecentRHR
     }
 }
