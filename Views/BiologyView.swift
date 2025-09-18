@@ -327,7 +327,7 @@ struct BiologyView: View {
         
         Task {
             // Trigger DataManager to refresh all data (including latest values)
-            await DataManager.shared.refreshAll()
+            DataManager.shared.refreshAll()
             
             await MainActor.run {
                 // Create HealthData from DataManager's latest values (LKV fallback)

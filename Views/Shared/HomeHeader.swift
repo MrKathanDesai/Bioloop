@@ -9,7 +9,7 @@ struct HomeHeader: View {
     @StateObject private var appearanceManager = AppearanceManager.shared
     @State private var showingAppearanceToggle = false
     @State private var showingCalendar = false
-    
+      
     var body: some View {
         HStack {
             // Date selector

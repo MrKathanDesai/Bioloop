@@ -12,12 +12,22 @@ final class DataManager: ObservableObject {
     @Published var hrvSeries: [HealthMetricPoint] = []
     @Published var rhrSeries: [HealthMetricPoint] = []
     @Published var weightSeries: [HealthMetricPoint] = []
+    @Published var stepsSeries: [HealthMetricPoint] = []
+    @Published var activeEnergySeries: [HealthMetricPoint] = []
+    @Published var recentWorkouts: [WorkoutSummary] = []
 
     // Today's basic metrics
     @Published var todaySteps: Double = 0
     @Published var todayHeartRate: Double = 0
     @Published var todayActiveEnergy: Double = 0
     @Published var todaySleepHours: Double = 0
+    @Published var todayRespiratoryRate: Double = 0
+    @Published var todaySpO2Percent: Double = 0
+    @Published var todayBodyTemperatureC: Double = 0
+    @Published var todayDietaryEnergy: Double = 0
+    @Published var todayProteinGrams: Double = 0
+    @Published var todayCarbsGrams: Double = 0
+    @Published var todayFatGrams: Double = 0
     
     // Authorization state
     @Published var hasHealthKitPermission: Bool = false
@@ -99,6 +109,32 @@ final class DataManager: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // Bind activity series for Fitness
+        hk.$steps30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 Steps series updated: \(series.count) points")
+                self?.stepsSeries = series
+            }
+            .store(in: &cancellables)
+
+        hk.$activeEnergy30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 Active energy series updated: \(series.count) points")
+                self?.activeEnergySeries = series
+            }
+            .store(in: &cancellables)
+
+        // Bind workouts
+        hk.$recentWorkouts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] items in
+                print("🔗 Recent workouts updated: \(items.count)")
+                self?.recentWorkouts = items
+            }
+            .store(in: &cancellables)
         
         // Bind today's metrics
         hk.$todaySteps
@@ -119,6 +155,41 @@ final class DataManager: ObservableObject {
         hk.$todaySleepHours
             .receive(on: RunLoop.main)
             .assign(to: \.todaySleepHours, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayRespiratoryRate
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayRespiratoryRate, on: self)
+            .store(in: &cancellables)
+
+        hk.$todaySpO2Percent
+            .receive(on: RunLoop.main)
+            .assign(to: \.todaySpO2Percent, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayBodyTemperatureC
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayBodyTemperatureC, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayDietaryEnergy
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayDietaryEnergy, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayProteinGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayProteinGrams, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayCarbsGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayCarbsGrams, on: self)
+            .store(in: &cancellables)
+
+        hk.$todayFatGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayFatGrams, on: self)
             .store(in: &cancellables)
         
         // Bind authorization state

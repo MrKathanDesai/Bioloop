@@ -34,7 +34,7 @@ struct HomeView: View {
                         if viewModel.canShowScores {
                             // Show real health data
                             VStack(spacing: 20) {
-                                // Core rings section
+                                // Core rings section - Quick Glance at Recovery, Strain, Sleep
                                 CoreRingsSection(
                                     recoveryScore: Double(viewModel.recoveryScore),
                                     sleepScore: Double(viewModel.sleepScore),
@@ -46,39 +46,116 @@ struct HomeView: View {
                                     )
                                 )
                                 
-                                // Simple metrics display
+                                // Vitals Status Section
                                 VStack(spacing: 16) {
-                                    Text("Today's Metrics")
-                                        .font(.headline)
-                                        .padding(.horizontal)
-                                    
-                                    HStack(spacing: 20) {
-                                        MetricCard(
-                                            title: "Steps",
-                                            value: viewModel.formattedSteps,
-                                            icon: "figure.walk"
-                                        )
-                                        
-                                        MetricCard(
-                                            title: "Heart Rate",
-                                            value: viewModel.formattedHeartRate + " BPM",
-                                            icon: "heart.fill"
-                                        )
+                                    HStack {
+                                        Text("Health")
+                                            .font(.headline)
+                                        Spacer()
                                     }
                                     .padding(.horizontal)
                                     
-                                    HStack(spacing: 20) {
-                                        MetricCard(
-                                            title: "Active Energy",
-                                            value: viewModel.formattedActiveEnergy + " cal",
-                                            icon: "flame.fill"
-                                        )
+                                    // Show vitals status using existing MetricCard style
+                                    VStack(spacing: 12) {
+                                        HStack(spacing: 20) {
+                                            VitalStatusCard(
+                                                title: "HRV",
+                                                value: DataManager.shared.hasDisplayableHRV ? String(format: "%.1f ms", DataManager.shared.latestHRV!) : "No data",
+                                                isInRange: DataManager.shared.hasRecentHRV && (DataManager.shared.latestHRV ?? 0) > 30,
+                                                icon: "waveform.path.ecg"
+                                            )
+                                            
+                                            VitalStatusCard(
+                                                title: "RHR",
+                                                value: DataManager.shared.hasDisplayableRHR ? String(format: "%.0f bpm", DataManager.shared.latestRHR!) : "No data",
+                                                isInRange: DataManager.shared.hasRecentRHR && (DataManager.shared.latestRHR ?? 0) < 70,
+                                                icon: "heart.fill"
+                                            )
+                                        }
+                                        .padding(.horizontal)
                                         
-                                        MetricCard(
-                                            title: "Sleep",
-                                            value: viewModel.formattedSleepHours + " hrs",
-                                            icon: "moon.fill"
-                                        )
+                                        HStack(spacing: 20) {
+                                            VitalStatusCard(
+                                                title: "Resp",
+                                                value: DataManager.shared.todayRespiratoryRate > 0 ? String(format: "%.0f bpm", DataManager.shared.todayRespiratoryRate) : "No data",
+                                                isInRange: DataManager.shared.todayRespiratoryRate > 0 && DataManager.shared.todayRespiratoryRate >= 10 && DataManager.shared.todayRespiratoryRate <= 20,
+                                                icon: "lungs.fill"
+                                            )
+                                            
+                                            VitalStatusCard(
+                                                title: "SpO2",
+                                                value: DataManager.shared.todaySpO2Percent > 0 ? String(format: "%.0f%%", DataManager.shared.todaySpO2Percent) : "No data",
+                                                isInRange: DataManager.shared.todaySpO2Percent >= 95,
+                                                icon: "drop.fill"
+                                            )
+                                        }
+                                        .padding(.horizontal)
+                                        
+                                        HStack(spacing: 20) {
+                                            VitalStatusCard(
+                                                title: "Temp",
+                                                value: DataManager.shared.todayBodyTemperatureC > 0 ? String(format: "%.1f°C", DataManager.shared.todayBodyTemperatureC) : "No data",
+                                                isInRange: DataManager.shared.todayBodyTemperatureC > 0 && DataManager.shared.todayBodyTemperatureC >= 35.5 && DataManager.shared.todayBodyTemperatureC <= 37.8,
+                                                icon: "thermometer"
+                                            )
+                                            
+                                            VitalStatusCard(
+                                                title: "Intake",
+                                                value: DataManager.shared.todayDietaryEnergy > 0 ? String(format: "%.0f kcal", DataManager.shared.todayDietaryEnergy) : "No data",
+                                                isInRange: true,
+                                                icon: "fork.knife"
+                                            )
+                                        }
+                                        .padding(.horizontal)
+                                    }
+                                }
+                                
+                                // Nutrition Section
+                                VStack(spacing: 16) {
+                                    HStack {
+                                        Text("Nutrition")
+                                            .font(.headline)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal)
+
+                                    // Single row: Intake donut left, macros level right
+                                    HStack(spacing: 16) {
+                                        // Intake Donut
+                                        HStack(spacing: 12) {
+                                            let totalTargetKcal: Double = 2200
+                                            let consumed = DataManager.shared.todayDietaryEnergy
+                                            let pct = max(0, min(consumed / totalTargetKcal, 1)) * 100
+                                            CircularProgressRing(
+                                                value: pct,
+                                                maxValue: 100,
+                                                lineWidth: 10,
+                                                color: .orange,
+                                                showValue: false,
+                                                size: 72
+                                            )
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(String(format: "%.0f kcal", consumed))
+                                                    .font(.system(size: 18, weight: .semibold))
+                                                Text("of \(Int(totalTargetKcal))")
+                                                    .font(.system(size: 12))
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(12)
+
+                                        // Macros Level Bars
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            MacroLevelRow(title: "Protein", value: DataManager.shared.todayProteinGrams, target: 120, color: .green)
+                                            MacroLevelRow(title: "Carbs", value: DataManager.shared.todayCarbsGrams, target: 250, color: .blue)
+                                            MacroLevelRow(title: "Fats", value: DataManager.shared.todayFatGrams, target: 70, color: .orange)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(12)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(12)
                                     }
                                     .padding(.horizontal)
                                 }
@@ -281,6 +358,178 @@ struct MetricCard: View {
             
             Text(title)
                 .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Vital Status Card (following existing MetricCard style)
+struct VitalStatusCard: View {
+    let title: String
+    let value: String
+    let isInRange: Bool
+    let icon: String
+    
+    private var statusColor: Color {
+        if value == "No data" {
+            return .secondary
+        }
+        return isInRange ? .green : .orange
+    }
+    
+    private var statusIcon: String {
+        if value == "No data" {
+            return "minus.circle"
+        }
+        return isInRange ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header with icon and status
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Image(systemName: statusIcon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(statusColor)
+            }
+            
+            // Value and title
+            VStack(alignment: .leading, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(value == "No data" ? .secondary : .primary)
+                
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            // Status bar (like in your screenshot)
+            if value != "No data" {
+                HStack(spacing: 0) {
+                    // Poor section (red/orange)
+                    Rectangle()
+                        .fill(Color.orange.opacity(isInRange ? 0.2 : 1.0))
+                        .frame(height: 4)
+                    
+                    // Good section (green)
+                    Rectangle()
+                        .fill(Color.green.opacity(isInRange ? 1.0 : 0.2))
+                        .frame(height: 4)
+                        .frame(maxWidth: .infinity)
+                }
+                .cornerRadius(2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(16)
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Macro Level Row
+private struct MacroLevelRow: View {
+    let title: String
+    let value: Double
+    let target: Double
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(String(format: "%.0f g", value))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 8)
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(0, min(CGFloat(value/target), 1)) * UIScreen.main.bounds.width * 0.35, height: 8)
+                // Healthy range marker (target)
+                Capsule()
+                    .fill(Color.primary.opacity(0.15))
+                    .frame(width: 2, height: 14)
+                    .offset(x: max(0, min(CGFloat(target/target), 1)) * UIScreen.main.bounds.width * 0.35 - 1)
+            }
+        }
+    }
+}
+
+// MARK: - Nutrition Card (following existing MetricCard style)
+struct NutritionCard: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundColor(.blue)
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Macro Card (following existing MetricCard style)
+struct MacroCard: View {
+    let title: String
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
