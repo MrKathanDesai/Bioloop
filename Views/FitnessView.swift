@@ -59,7 +59,7 @@ struct CalendarHeatmapCard: View {
                     
                     // Days of week header
                     HStack(spacing: 6) {
-                        ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
+                        ForEach(Array(zip(["M", "T", "W", "T", "F", "S", "S"].indices, ["M", "T", "W", "T", "F", "S", "S"])), id: \.0) { index, day in
                             Text(day)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
@@ -70,10 +70,11 @@ struct CalendarHeatmapCard: View {
                     // July calendar grid - proper week-based layout
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
                         // July starts on a Tuesday, so we need to offset the first week
-                        ForEach(0..<2, id: \.self) { _ in
+                        ForEach(0..<2, id: \.self) { index in
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.clear)
                                 .frame(width: 24, height: 24)
+                                .id("july-offset-\(index)")
                         }
                         
                         // July days (1-31)
@@ -87,6 +88,7 @@ struct CalendarHeatmapCard: View {
                                         .fill(activityTint(for: activityCount))
                                 )
                                 .frame(width: 24, height: 24)
+                                .id("july-\(day)") // Unique ID for July days
                         }
                     }
                 }
@@ -100,7 +102,7 @@ struct CalendarHeatmapCard: View {
                     
                     // Days of week header
                     HStack(spacing: 6) {
-                        ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
+                        ForEach(Array(zip(["M", "T", "W", "T", "F", "S", "S"].indices, ["M", "T", "W", "T", "F", "S", "S"])), id: \.0) { index, day in
                             Text(day)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
@@ -111,10 +113,11 @@ struct CalendarHeatmapCard: View {
                     // August calendar grid - proper week-based layout
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
                         // August starts on a Friday, so we need to offset the first week
-                        ForEach(0..<5, id: \.self) { _ in
+                        ForEach(0..<5, id: \.self) { index in
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.clear)
                                 .frame(width: 24, height: 24)
+                                .id("august-offset-\(index)")
                         }
                         
                         // August days (1-30)
@@ -137,6 +140,7 @@ struct CalendarHeatmapCard: View {
                                     }
                                 )
                                 .frame(width: 24, height: 24)
+                                .id("august-\(day)") // Unique ID for August days
                         }
                     }
                 }

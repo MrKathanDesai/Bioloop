@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Import the MonthlyCalendarView
+// Simple date picker functionality
 
 struct HomeHeader: View {
     @Binding var selectedDate: Date
@@ -59,7 +59,20 @@ struct HomeHeader: View {
             AppearanceToggleView(appearanceManager: appearanceManager)
         }
         .sheet(isPresented: $showingCalendar) {
-            MonthlyCalendarView(selectedDate: $selectedDate, viewModel: viewModel)
+            // Simple date picker instead of complex calendar
+            NavigationView {
+                DatePicker("Select Date", selection: $selectedDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .navigationTitle("Select Date")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showingCalendar = false
+                            }
+                        }
+                    }
+            }
         }
     }
     

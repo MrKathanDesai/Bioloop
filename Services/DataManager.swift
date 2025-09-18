@@ -1,269 +1,186 @@
-import Foundation
-import CoreData
 import Combine
-import HealthKit
-
-// MARK: - Apple HealthKit Best Practices Data Manager
+import Foundation
 
 @MainActor
-class DataManager: ObservableObject {
+final class DataManager: ObservableObject {
     static let shared = DataManager()
+    private let hk = HealthKitManager.shared
+    private var cancellables: Set<AnyCancellable> = []
 
-    private let healthKitManager = HealthKitManager.shared
-    private let calculator = HealthCalculator.shared
+    // Biology metrics (30-day series)
+    @Published var vo2MaxSeries: [HealthMetricPoint] = []
+    @Published var hrvSeries: [HealthMetricPoint] = []
+    @Published var rhrSeries: [HealthMetricPoint] = []
+    @Published var weightSeries: [HealthMetricPoint] = []
 
-    @Published var healthScores: [Date: HealthScore] = [:]
-    @Published var journalEntries: [JournalEntry] = []
-    @Published var isLoading = false
+    // Today's basic metrics
+    @Published var todaySteps: Double = 0
+    @Published var todayHeartRate: Double = 0
+    @Published var todayActiveEnergy: Double = 0
+    @Published var todaySleepHours: Double = 0
+    
+    // Authorization state
     @Published var hasHealthKitPermission: Bool = false
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
 
-    private var cancellables = Set<AnyCancellable>()
-
-    // MARK: - Privacy-Compliant Caching
-    // Only cache non-sensitive calculated scores, not raw health data
-    private var scoreCache: [Date: HealthScore] = [:]
-    private let maxCacheSize = 30 // Keep only 30 days of cached scores
-    private let cacheExpirationTime: TimeInterval = 3600 // 1 hour
-
-    init() {
-        print("🚀 DataManager initialized with Apple HealthKit best practices")
-        setupHealthKitObservation()
-        updatePermissionStatus()
-        startHealthDataObservation()
+    private init() {
+        setupBindings()
     }
-
-    private func setupHealthKitObservation() {
-        print("🔧 Setting up HealthKit observation")
-        healthKitManager.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                print("📡 Received HealthKit change notification")
-                self?.updatePermissionStatus()
+    
+    private func setupBindings() {
+        print("🔗 Setting up DataManager bindings...")
+        
+        // Bind HealthKitManager -> DataManager for biology metrics
+        hk.$vo2Max30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 VO2 Max series updated: \(series.count) points")
+                self?.vo2MaxSeries = series
+                // Update latest value for Biology tab
+                self?.latestVO2Max = series.last?.value
             }
             .store(in: &cancellables)
-    }
-    
-    private func startHealthDataObservation() {
-        // Start observing health data changes for real-time updates
-        healthKitManager.startObservingHealthData()
-    }
 
-    func updatePermissionStatus() {
-        // Force a fresh permission check
-        healthKitManager.refreshPermissions()
+        hk.$hrv30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 HRV series updated: \(series.count) points")
+                self?.hrvSeries = series
+                // Update latest value for Biology tab
+                self?.latestHRV = series.last?.value
+            }
+            .store(in: &cancellables)
+
+        hk.$rhr30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 RHR series updated: \(series.count) points")
+                self?.rhrSeries = series
+                // Update latest value for Biology tab
+                self?.latestRHR = series.last?.value
+            }
+            .store(in: &cancellables)
+
+        hk.$weight30
+            .receive(on: RunLoop.main)
+            .sink { [weak self] series in
+                print("🔗 Weight series updated: \(series.count) points")
+                self?.weightSeries = series
+                // Update latest value for Biology tab
+                self?.latestWeight = series.last?.value
+            }
+            .store(in: &cancellables)
         
-        let hkStatus = healthKitManager.authorizationStatus
-        let newPermissionStatus = hkStatus == .sharingAuthorized
-
-        print("🔍 updatePermissionStatus called:")
-        print("   HealthKit status: \(hkStatus.rawValue)")
-        print("   Current permission status: \(hasHealthKitPermission)")
-        print("   New permission status: \(newPermissionStatus)")
-
-        // Always update, even if same value, to ensure consistency
-        hasHealthKitPermission = newPermissionStatus
-        print("🔄 DataManager permission status updated to: \(hasHealthKitPermission)")
-    }
-
-    // MARK: - Data Fetching (Privacy-Compliant)
-
-    func fetchHealthData(for date: Date) async throws -> HealthScore {
-        let startOfDay = Calendar.current.startOfDay(for: date)
-        
-        // Check cache first (only for calculated scores, not raw data)
-        if let cachedScore = getCachedScore(for: startOfDay) {
-            print("📋 Using cached score for \(date)")
-            return cachedScore
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            // Always fetch fresh data from HealthKit (source of truth)
-            let rawData = try await healthKitManager.fetchHealthData(for: date)
-
-            // Calculate scores from fresh data
-            let score = calculator.calculateHealthScores(from: rawData)
-
-            // Cache only the calculated score (not raw health data)
-            cacheScore(score, for: startOfDay)
-
-            return score
-        } catch {
-            print("❌ Error fetching health data: \(error)")
-            throw error
-        }
-    }
-    
-    // MARK: - Privacy-Compliant Caching
-    
-    private func getCachedScore(for date: Date) -> HealthScore? {
-        guard let cachedScore = scoreCache[date] else { return nil }
-        
-        // Check if cache is still valid (not expired)
-        let cacheAge = Date().timeIntervalSince(cachedScore.date)
-        if cacheAge > cacheExpirationTime {
-            scoreCache.removeValue(forKey: date)
-            return nil
-        }
-        
-        return cachedScore
-    }
-    
-    private func cacheScore(_ score: HealthScore, for date: Date) {
-        // Clean up old cache entries to maintain privacy
-        cleanupCache()
-        
-        // Store only the calculated score
-        scoreCache[date] = score
-        healthScores[date] = score
-    }
-    
-    private func cleanupCache() {
-        // Remove old cache entries to maintain privacy and performance
-        let cutoffDate = Date().addingTimeInterval(-TimeInterval(maxCacheSize * 24 * 3600)) // 30 days ago
-        
-        scoreCache = scoreCache.filter { $0.key >= cutoffDate }
-        
-        if scoreCache.count > maxCacheSize {
-            // Remove oldest entries if we exceed max cache size
-            let sortedEntries = scoreCache.sorted { $0.key < $1.key }
-            let entriesToRemove = sortedEntries.prefix(scoreCache.count - maxCacheSize)
+        // Bind today's metrics
+        hk.$todaySteps
+            .receive(on: RunLoop.main)
+            .assign(to: \.todaySteps, on: self)
+            .store(in: &cancellables)
             
-            for (date, _) in entriesToRemove {
-                scoreCache.removeValue(forKey: date)
-            }
-        }
+        hk.$todayHeartRate
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayHeartRate, on: self)
+            .store(in: &cancellables)
+            
+        hk.$todayActiveEnergy
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayActiveEnergy, on: self)
+            .store(in: &cancellables)
+            
+        hk.$todaySleepHours
+            .receive(on: RunLoop.main)
+            .assign(to: \.todaySleepHours, on: self)
+            .store(in: &cancellables)
+        
+        // Bind authorization state
+        hk.$hasPermission
+            .receive(on: RunLoop.main)
+            .assign(to: \.hasHealthKitPermission, on: self)
+            .store(in: &cancellables)
+            
+        hk.$isLoading
+            .receive(on: RunLoop.main)
+            .assign(to: \.isLoading, on: self)
+            .store(in: &cancellables)
+            
+        hk.$errorMessage
+            .receive(on: RunLoop.main)
+            .assign(to: \.errorMessage, on: self)
+            .store(in: &cancellables)
+        
+        print("🔗 DataManager bindings setup completed")
     }
 
-    func fetchHealthScores(for dateRange: ClosedRange<Date>) async throws -> [HealthScore] {
-        var scores: [HealthScore] = []
-        let calendar = Calendar.current
-
-        // Generate all dates in range
-        var currentDate = dateRange.lowerBound
-        while currentDate <= dateRange.upperBound {
-            let startOfDay = calendar.startOfDay(for: currentDate)
-
+    // MARK: - Public API
+    
+    /// Call this from App launch or HomeView .onAppear
+    func refreshAll() {
+        print("🔄 DataManager.refreshAll() called")
+        Task {
             do {
-                let score = try await fetchHealthData(for: startOfDay)
-                scores.append(score)
+                let success = try await hk.requestAuthorization()
+                if success {
+                    print("🔄 Authorization successful - loading data")
+                    // load initial 30-day biology data
+                    await hk.loadBiology30Days()
+                    // start observation for incremental updates
+                    hk.startObservers()
+                } else {
+                    print("🔄 Authorization failed")
+                }
             } catch {
-                print("⚠️ Failed to fetch data for \(startOfDay): \(error)")
-                // Create unavailable score for missing data
-                let unavailableScore = HealthScore(
-                    recovery: HealthScore.ScoreComponent(value: 0, status: .unavailable, trend: nil, subMetrics: nil),
-                    sleep: HealthScore.ScoreComponent(value: 0, status: .unavailable, trend: nil, subMetrics: nil),
-                    strain: HealthScore.ScoreComponent(value: 0, status: .unavailable, trend: nil, subMetrics: nil),
-                    stress: HealthScore.ScoreComponent(value: 0, status: .unavailable, trend: nil, subMetrics: nil),
-                    date: startOfDay,
-                    dataAvailability: DataAvailability(hasHealthKitPermission: false, hasAppleWatchData: false, lastSyncDate: nil, missingDataTypes: [])
-                )
-                scores.append(unavailableScore)
+                print("🔄 Authorization failed: \(error)")
             }
-
-            // Move to next day
-            guard let nextDate = calendar.date(byAdding: .day, value: 1, to: currentDate) else {
-                break
-            }
-            currentDate = nextDate
-        }
-
-        return scores
-    }
-
-    // MARK: - Trend Data
-
-    func getTrendData(for scoreType: String, days: Int = 7) -> [Double] {
-        let calendar = Calendar.current
-        let endDate = Date()
-        let startDate = calendar.date(byAdding: .day, value: -days, to: endDate) ?? endDate
-
-        guard let dateRange = startDate...endDate as? ClosedRange<Date> else {
-            return []
-        }
-
-        // Get scores from cache or calculate trends
-        let scores = healthScores.values.filter { dateRange.contains($0.date) }
-        return calculator.calculateTrend(for: Array(scores), scoreType: scoreType, days: days)
-    }
-
-    // MARK: - Cache Management (Privacy-Compliant)
-
-    func clearCache() {
-        scoreCache.removeAll()
-        healthScores.removeAll()
-        print("🧹 Privacy-compliant cache cleared")
-    }
-
-    func preloadHistoricalData(days: Int = 30) async {
-        let calendar = Calendar.current
-        let endDate = Date()
-        let startDate = calendar.date(byAdding: .day, value: -days, to: endDate) ?? endDate
-
-        guard let dateRange = startDate...endDate as? ClosedRange<Date> else {
-            return
-        }
-
-        print("📊 Preloading \(days) days of historical data...")
-
-        do {
-            let scores = try await fetchHealthScores(for: dateRange)
-            print("✅ Preloaded \(scores.count) days of data")
-        } catch {
-            print("❌ Failed to preload historical data: \(error)")
         }
     }
-
-    // MARK: - Journal Management (Placeholder)
-
-    func saveJournalEntry(_ entry: JournalEntry) {
-        journalEntries.append(entry)
-        // TODO: Implement CoreData persistence
-        print("✅ Journal entry saved: \(entry.title)")
-    }
-
-    func getJournalEntries(for date: Date) -> [JournalEntry] {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: date)
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? date
-
-        return journalEntries.filter { entry in
-            startOfDay <= entry.date && entry.date < endOfDay
+    
+    /// Request authorization (centralized)
+    func requestHealthKitPermissions() async {
+        print("🔴 DataManager.requestHealthKitPermissions() called")
+        let success = await hk.requestAuthorizationIfNeeded()
+        if success {
+            print("🔴 DataManager: HealthKit authorization successful")
+        } else {
+            print("🔴 DataManager: HealthKit authorization failed")
         }
     }
-
-    // MARK: - HealthKit Integration
-
-    func requestHealthKitPermissions() async throws {
-        print("🚀 Starting HealthKit permission request")
-        let statusBefore = healthKitManager.authorizationStatus
-        print("📊 Status before request: \(statusBefore.rawValue)")
-
-        try await healthKitManager.requestPermissions()
-
-        print("✅ Permission request completed")
-        // Small delay to ensure HealthKit has processed the authorization
-        try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-
-        let statusAfter = healthKitManager.authorizationStatus
-        print("📊 Status after request: \(statusAfter.rawValue)")
-
-        // Force update permission status
-        await MainActor.run {
-            updatePermissionStatus()
-            print("🎯 Final permission status: \(hasHealthKitPermission)")
-        }
+    
+    /// Refresh authorization status
+    func refreshPermissions() async {
+        print("🔄 DataManager.refreshPermissions() called")
+        await hk.refreshAuthorizationStatus()
     }
-
-    func checkDataAvailability() -> DataAvailability {
-        return healthKitManager.checkDataAvailability()
+    
+    // Latest values for Biology tab (Last Known Values)
+    @Published var latestVO2Max: Double? = nil
+    @Published var latestHRV: Double? = nil
+    @Published var latestRHR: Double? = nil
+    @Published var latestWeight: Double? = nil
+    
+    /// Get 7-day average RHR
+    var averageRHR7Days: Double? {
+        let recent = Array(rhrSeries.suffix(7))
+        guard !recent.isEmpty else { return nil }
+        let sum = recent.reduce(0) { $0 + $1.value }
+        return sum / Double(recent.count)
     }
-
-    func getHealthKitAuthorizationStatus() -> HKAuthorizationStatus {
-        return healthKitManager.authorizationStatus
+    
+    /// Get 7-day average HRV
+    var averageHRV7Days: Double? {
+        let recent = Array(hrvSeries.suffix(7))
+        guard !recent.isEmpty else { return nil }
+        let sum = recent.reduce(0) { $0 + $1.value }
+        return sum / Double(recent.count)
+    }
+    
+    /// Check if we have any biology data
+    var hasBiologyData: Bool {
+        return !vo2MaxSeries.isEmpty || !hrvSeries.isEmpty || !rhrSeries.isEmpty || !weightSeries.isEmpty
+    }
+    
+    /// Check if we have today's basic metrics
+    var hasTodayData: Bool {
+        return todaySteps > 0 || todayHeartRate > 0 || todayActiveEnergy > 0 || todaySleepHours > 0
     }
 }
-
-

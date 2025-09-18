@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 struct MetricDetailView: View {
     let metric: BiologyMetric
@@ -146,49 +147,52 @@ struct MetricDetailView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            // Enhanced trend chart with better data
+            // Swift Charts implementation
             if metric.isDataAvailable && !historicalData.isEmpty {
-                HStack(alignment: .bottom, spacing: 8) {
+                Chart {
                     ForEach(Array(historicalData.enumerated()), id: \.offset) { index, value in
-                        VStack(spacing: 4) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(metric.color)
-                                .frame(width: 24, height: CGFloat(value.normalized * 80))
-                            
-                            VStack(spacing: 2) {
-                                Text(value.displayValue)
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.primary)
-                                
-                                Text("Today")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
+                        BarMark(
+                            x: .value("Day", dayAbbreviation(for: index)),
+                            y: .value("Value", value.normalized * 100)
+                        )
+                        .foregroundStyle(metric.color)
+                        .cornerRadius(2)
                     }
                     
                     // Show placeholder bars for missing historical data
-                    ForEach(1..<7) { index in
-                        VStack(spacing: 4) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color(.systemGray5))
-                                .frame(width: 24, height: 20)
-                            
-                            VStack(spacing: 2) {
-                                Text("--")
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.secondary)
-                                
-                                Text(dayAbbreviation(for: 7 - index))
+                    ForEach(historicalData.count..<7, id: \.self) { index in
+                        BarMark(
+                            x: .value("Day", dayAbbreviation(for: index)),
+                            y: .value("Value", 0)
+                        )
+                        .foregroundStyle(Color(.systemGray5))
+                        .cornerRadius(2)
+                    }
+                }
+                .frame(height: 120)
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let intValue = value.as(Int.self) {
+                                Text("\(intValue)")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
                         }
                     }
                 }
-                .frame(height: 120)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel {
+                            if let stringValue = value.as(String.self) {
+                                Text(stringValue)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "chart.bar.xaxis")

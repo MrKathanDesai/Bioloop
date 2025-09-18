@@ -29,21 +29,34 @@ struct JournalView: View {
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingCustomizeJournal) {
-                CustomizeJournalView()
+                // Simple settings view instead of complex customization
+                NavigationView {
+                    Text("Journal Settings")
+                        .navigationTitle("Settings")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Done") {
+                                    showingCustomizeJournal = false
+                                }
+                            }
+                        }
+                }
             }
             .sheet(isPresented: $showingDatePicker) {
                 NavigationView {
-                    MonthlyCalendarView(selectedDate: $viewModel.selectedDate, viewModel: HomeViewModel.shared)
-                        .navigationTitle(Constants.Strings.selectDate)
+                    DatePicker("Select Date", selection: $viewModel.selectedDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .navigationTitle("Select Date")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
                             ToolbarItem(placement: .navigationBarLeading) {
-                                Button(Constants.Strings.cancel) {
+                                Button("Cancel") {
                                     showingDatePicker = false
                                 }
                             }
                             ToolbarItem(placement: .navigationBarTrailing) {
-                                Button(Constants.Strings.done) {
+                                Button("Done") {
                                     showingDatePicker = false
                                     viewModel.changeDate(to: viewModel.selectedDate)
                                 }

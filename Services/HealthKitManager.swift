@@ -2,729 +2,564 @@ import Foundation
 import HealthKit
 import Combine
 
-// MARK: - Apple HealthKit Best Practices Implementation
-
-@MainActor
-class HealthKitManager: ObservableObject {
-    static let shared = HealthKitManager()
+// Simple DTO for UI
+public struct HealthMetricPoint: Codable, Identifiable {
+    public let date: Date
+    public let value: Double
     
-    private let healthStore = HKHealthStore()
-    private let calendar = Calendar.current
-    
-    @Published var authorizationStatus: HKAuthorizationStatus = .notDetermined
-    @Published var isDataAvailable = false
-    @Published var lastSyncDate: Date?
-    @Published var backgroundDeliveryEnabled = false
-    
-    // MARK: - HealthKit Data Types (Following Apple Guidelines)
-    
-    private let readTypes: Set<HKObjectType> = {
-        var types: Set<HKObjectType> = []
-        
-        // Heart & Cardiovascular
-        if let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate) {
-            types.insert(heartRate)
-        }
-        if let hrv = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
-            types.insert(hrv)
-        }
-        if let vo2Max = HKQuantityType.quantityType(forIdentifier: .vo2Max) {
-            types.insert(vo2Max)
-        }
-        if let restingHR = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
-            types.insert(restingHR)
-        }
-        if let walkingHR = HKQuantityType.quantityType(forIdentifier: .walkingHeartRateAverage) {
-            types.insert(walkingHR)
-        }
-        
-        // Activity & Energy
-        if let activeEnergy = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
-            types.insert(activeEnergy)
-        }
-        if let basalEnergy = HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned) {
-            types.insert(basalEnergy)
-        }
-        if let exerciseTime = HKQuantityType.quantityType(forIdentifier: .appleExerciseTime) {
-            types.insert(exerciseTime)
-        }
-        if let standTime = HKQuantityType.quantityType(forIdentifier: .appleStandTime) {
-            types.insert(standTime)
-        }
-        if let stepCount = HKQuantityType.quantityType(forIdentifier: .stepCount) {
-            types.insert(stepCount)
-        }
-        if let walkingDistance = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) {
-            types.insert(walkingDistance)
-        }
-        
-        // Body Measurements
-        if let bodyMass = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
-            types.insert(bodyMass)
-        }
-        if let bodyFat = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) {
-            types.insert(bodyFat)
-        }
-        if let leanBodyMass = HKQuantityType.quantityType(forIdentifier: .leanBodyMass) {
-            types.insert(leanBodyMass)
-        }
-        if let height = HKQuantityType.quantityType(forIdentifier: .height) {
-            types.insert(height)
-        }
-        
-        // Sleep
-        if let sleepAnalysis = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
-            types.insert(sleepAnalysis)
-        }
-        
-        // Workouts
-        types.insert(HKWorkoutType.workoutType())
-        
-        return types
-    }()
-    
-    private let writeTypes: Set<HKSampleType> = {
-        // Only request write access for data we actually need to write
-        var types: Set<HKSampleType> = []
-        
-        // We might want to write workout data or custom metrics
-        types.insert(HKWorkoutType.workoutType())
-        
-        return types
-    }()
-    
-    // MARK: - Sample Types for Observer Queries
-    
-    private let observerSampleTypes: [HKSampleType] = {
-        var types: [HKSampleType] = []
-        
-        // Heart & Cardiovascular
-        if let heartRate = HKQuantityType.quantityType(forIdentifier: .heartRate) {
-            types.append(heartRate)
-        }
-        if let hrv = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
-            types.append(hrv)
-        }
-        
-        // Sleep
-        if let sleepAnalysis = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
-            types.append(sleepAnalysis)
-        }
-        
-        return types
-    }()
-    
-    // MARK: - Initialization
-    
-    private init() {
-        checkHealthKitAvailability()
-        setupBackgroundDelivery()
-    }
-    
-    // MARK: - HealthKit Availability Check
-    
-    func checkHealthKitAvailability() {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            print("❌ HealthKit not available on this device")
-            authorizationStatus = .notDetermined
-            isDataAvailable = false
-            return
-        }
-        
-        // Check authorization status for primary data type (heart rate)
-        guard let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
-            print("❌ Heart rate type not available")
-            return
-        }
-        
-        let newStatus = healthStore.authorizationStatus(for: heartRateType)
-        
-        if authorizationStatus != newStatus {
-            authorizationStatus = newStatus
-            isDataAvailable = authorizationStatus == .sharingAuthorized
-            
-            print("🔄 Authorization status updated: \(newStatus.rawValue)")
-            print("📊 Data available: \(isDataAvailable)")
-            
-            // Update last sync date if we have permission
-            if isDataAvailable {
-                lastSyncDate = Date()
-            }
-        }
-    }
-    
-    // MARK: - Authorization Request (Following Apple Guidelines)
-    
-    func requestPermissions() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            throw HealthKitError.healthDataNotAvailable
-        }
-        
-        print("🔐 Requesting HealthKit permissions...")
-        
-        do {
-            // Request authorization with proper error handling
-            try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
-            
-            // Wait a moment for HealthKit to process the authorization
-            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            
-            // Check the updated status
-            await MainActor.run {
-                self.checkHealthKitAvailability()
-            }
-            
-            print("✅ HealthKit permissions requested successfully")
-            
-        } catch {
-            print("❌ HealthKit permission error: \(error)")
-            throw HealthKitError.permissionDenied
-        }
-    }
-    
-    // MARK: - Background Delivery Setup (Apple Best Practice)
-    
-    private func setupBackgroundDelivery() {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-        
-        // Enable background delivery for key data types
-        let keyTypes: [HKObjectType] = [
-            HKQuantityType.quantityType(forIdentifier: .heartRate)!,
-            HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
-            HKCategoryType.categoryType(forIdentifier: .sleepAnalysis)!,
-            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
-        ]
-        
-        for type in keyTypes {
-            healthStore.enableBackgroundDelivery(for: type, frequency: .immediate) { [weak self] success, error in
-                DispatchQueue.main.async {
-                    if success {
-                        print("✅ Background delivery enabled for \(type.identifier)")
-                        self?.backgroundDeliveryEnabled = true
-                    } else {
-                        print("❌ Background delivery failed for \(type.identifier): \(error?.localizedDescription ?? "Unknown error")")
-                    }
-                }
-            }
-        }
-    }
-    
-    // MARK: - Data Fetching (Optimized for Performance)
-    
-    func fetchHealthData(for date: Date) async throws -> HealthData {
-        let startOfDay = calendar.startOfDay(for: date)
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-        
-        print("📊 Fetching health data for: \(date)")
-        
-        // Fetch all data concurrently for better performance
-        async let hrvData = fetchHRVData(from: startOfDay, to: endOfDay)
-        async let rhrData = fetchRestingHeartRate(from: startOfDay, to: endOfDay)
-        async let hrData = fetchHeartRateData(from: startOfDay, to: endOfDay)
-        async let energyData = fetchEnergyBurned(from: startOfDay, to: endOfDay)
-        async let sleepData = fetchSleepData(for: date)
-        async let vo2MaxData = fetchVO2MaxData(from: startOfDay, to: endOfDay)
-        async let weightData = fetchWeightData(from: startOfDay, to: endOfDay)
-        async let leanBodyMassData = fetchLeanBodyMassData(from: startOfDay, to: endOfDay)
-        async let bodyFatData = fetchBodyFatData(from: startOfDay, to: endOfDay)
-        
-        // Wait for all data
-        let hrv = try await hrvData
-        let rhr = try await rhrData
-        let hr = try await hrData
-        let energy = try await energyData
-        let sleep = try await sleepData
-        let vo2Max = try await vo2MaxData
-        let weight = try await weightData
-        let leanBodyMass = try await leanBodyMassData
-        let bodyFat = try await bodyFatData
-        
-        return HealthData(
-            date: date,
-            hrv: hrv,
-            restingHeartRate: rhr,
-            heartRate: hr,
-            energyBurned: energy,
-            sleepStart: sleep.start,
-            sleepEnd: sleep.end,
-            sleepDuration: sleep.duration,
-            sleepEfficiency: sleep.efficiency,
-            deepSleep: sleep.deepSleep,
-            remSleep: sleep.remSleep,
-            wakeEvents: sleep.wakeEvents,
-            workoutMinutes: nil, // TODO: Implement workout data
-            vo2Max: vo2Max,
-            weight: weight,
-            leanBodyMass: leanBodyMass,
-            bodyFat: bodyFat
-        )
-    }
-    
-    // MARK: - Individual Data Fetchers (Using Correct Units)
-    
-    private func fetchHRVData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let hrvType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: hrvType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // HRV is stored in milliseconds (ms) in HealthKit
-                    let value = sample.quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
-                    print("✅ HRV: \(value)ms")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ HRV: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchRestingHeartRate(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: rhrType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // Heart rate is stored in beats per minute (bpm)
-                    let value = sample.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-                    print("✅ RHR: \(value)BPM")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ RHR: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchHeartRateData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let query = HKStatisticsQuery(
-                quantityType: hrType,
-                quantitySamplePredicate: predicate,
-                options: .discreteAverage
-            ) { _, statistics, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let avgHR = statistics?.averageQuantity()?.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) {
-                    print("✅ Avg HR: \(avgHR)BPM")
-                    continuation.resume(returning: avgHR)
-                } else {
-                    print("⚠️ Avg HR: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchVO2MaxData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let vo2MaxType = HKQuantityType.quantityType(forIdentifier: .vo2Max) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: vo2MaxType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // VO2 Max is stored in ml/kg/min
-                    let value = sample.quantity.doubleValue(for: HKUnit(from: "ml/kg/min"))
-                    print("✅ VO2 Max: \(value) ml/kg/min")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ VO2 Max: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchWeightData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: weightType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // Weight is stored in kilograms (kg)
-                    let value = sample.quantity.doubleValue(for: HKUnit.gramUnit(with: .kilo))
-                    print("✅ Weight: \(value) kg")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ Weight: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchLeanBodyMassData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let leanBodyMassType = HKQuantityType.quantityType(forIdentifier: .leanBodyMass) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: leanBodyMassType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // Lean body mass is stored in kilograms (kg)
-                    let value = sample.quantity.doubleValue(for: HKUnit.gramUnit(with: .kilo))
-                    print("✅ Lean Body Mass: \(value) kg")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ Lean Body Mass: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchBodyFatData(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let bodyFatType = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: bodyFatType,
-                predicate: predicate,
-                limit: 1,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let sample = samples?.first as? HKQuantitySample {
-                    // Body fat percentage is stored as a percentage (0-100)
-                    let value = sample.quantity.doubleValue(for: HKUnit.percent())
-                    print("✅ Body Fat: \(value)%")
-                    continuation.resume(returning: value)
-                } else {
-                    print("⚠️ Body Fat: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchEnergyBurned(from startDate: Date, to endDate: Date) async throws -> Double? {
-        guard let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
-            return nil
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-            let query = HKStatisticsQuery(
-                quantityType: energyType,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum
-            ) { _, statistics, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                if let totalEnergy = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) {
-                    print("✅ Energy Burned: \(totalEnergy)kcal")
-                    continuation.resume(returning: totalEnergy)
-                } else {
-                    print("⚠️ Energy Burned: No data")
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    private func fetchSleepData(for date: Date) async throws -> (start: Date?, end: Date?, duration: Double?, efficiency: Double?, deepSleep: Double?, remSleep: Double?, wakeEvents: Int?) {
-        guard let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else {
-            return (nil, nil, nil, nil, nil, nil, nil)
-        }
-        
-        let startOfDay = calendar.startOfDay(for: date)
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-            
-            let query = HKSampleQuery(
-                sampleType: sleepType,
-                predicate: predicate,
-                limit: HKObjectQueryNoLimit,
-                sortDescriptors: [sortDescriptor]
-            ) { _, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                guard let sleepSamples = samples as? [HKCategorySample] else {
-                    print("⚠️ Sleep: No data")
-                    continuation.resume(returning: (nil, nil, nil, nil, nil, nil, nil))
-                    return
-                }
-                
-                print("✅ Sleep: \(sleepSamples.count) samples")
-                
-                // Process sleep samples according to Apple's sleep analysis categories
-                var sleepStart: Date?
-                var sleepEnd: Date?
-                var totalSleepTime: TimeInterval = 0
-                var inBedTime: TimeInterval = 0
-                var wakeEvents = 0
-                var deepSleepTime: TimeInterval = 0
-                var remSleepTime: TimeInterval = 0
-                
-                for sample in sleepSamples {
-                    let duration = sample.endDate.timeIntervalSince(sample.startDate)
-                    inBedTime += duration
-                    
-                    switch sample.value {
-                    case HKCategoryValueSleepAnalysis.inBed.rawValue:
-                        // In bed time
-                        if sleepStart == nil || sample.startDate < sleepStart! {
-                            sleepStart = sample.startDate
-                        }
-                        if sleepEnd == nil || sample.endDate > sleepEnd! {
-                            sleepEnd = sample.endDate
-                        }
-                    case HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue:
-                        // Actual sleep time
-                        totalSleepTime += duration
-                    case HKCategoryValueSleepAnalysis.awake.rawValue:
-                        // Wake time during sleep
-                        wakeEvents += 1
-                    case HKCategoryValueSleepAnalysis.asleepCore.rawValue:
-                        // Core sleep
-                        totalSleepTime += duration
-                    case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
-                        // Deep sleep
-                        totalSleepTime += duration
-                        deepSleepTime += duration
-                    case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
-                        // REM sleep
-                        totalSleepTime += duration
-                        remSleepTime += duration
-                    default:
-                        break
-                    }
-                }
-                
-                let sleepDuration = totalSleepTime / 3600.0 // Convert to hours
-                let efficiency = inBedTime > 0 ? totalSleepTime / inBedTime : 0
-                let deepSleepHours = deepSleepTime / 3600.0
-                let remSleepHours = remSleepTime / 3600.0
-                
-                print("✅ Sleep Duration: \(sleepDuration)h, Efficiency: \(efficiency * 100)%")
-                print("✅ Deep Sleep: \(deepSleepHours)h, REM Sleep: \(remSleepHours)h")
-                
-                continuation.resume(returning: (sleepStart, sleepEnd, sleepDuration, efficiency, deepSleepHours, remSleepHours, wakeEvents))
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    // MARK: - Observer Queries for Real-time Updates (Apple Best Practice)
-    
-    func startObservingHealthData() {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-        
-        // Set up observer queries for key metrics using the correct sample types
-        for sampleType in observerSampleTypes {
-            let query = HKObserverQuery(sampleType: sampleType, predicate: nil) { [weak self] _, completionHandler, error in
-                if let error = error {
-                    print("❌ Observer query error for \(sampleType.identifier): \(error)")
-                    completionHandler()
-                    return
-                }
-                
-                print("📡 Health data updated for \(sampleType.identifier)")
-                
-                // Update last sync date
-                DispatchQueue.main.async {
-                    self?.lastSyncDate = Date()
-                }
-                
-                completionHandler()
-            }
-            
-            healthStore.execute(query)
-        }
-    }
-    
-    // MARK: - Data Availability Check
-    
-    func checkDataAvailability() -> DataAvailability {
-        checkHealthKitAvailability()
-        
-        let hasPermission = authorizationStatus == .sharingAuthorized
-        
-        // Test with a simple heart rate query to verify data access
-        var hasData = false
-        let semaphore = DispatchSemaphore(value: 0)
-        
-        if let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) {
-            let predicate = HKQuery.predicateForSamples(withStart: Date.distantPast, end: Date(), options: [])
-            let query = HKSampleQuery(sampleType: hrType, predicate: predicate, limit: 1, sortDescriptors: nil) { _, samples, _ in
-                hasData = (samples?.count ?? 0) > 0
-                semaphore.signal()
-            }
-            healthStore.execute(query)
-            semaphore.wait()
-        }
-        
-        print("🔍 Data availability - Permission: \(hasPermission), Has Data: \(hasData)")
-        
-        return DataAvailability(
-            hasHealthKitPermission: hasPermission,
-            hasAppleWatchData: hasData,
-            lastSyncDate: lastSyncDate,
-            missingDataTypes: hasPermission ? [] : ["Heart Rate", "HRV", "Sleep", "Activity"]
-        )
-    }
-    
-    // MARK: - Permission Refresh
-    
-    func refreshPermissions() {
-        print("🔄 Refreshing HealthKit permissions...")
-        checkHealthKitAvailability()
-    }
+    public var id: Date { date }
 }
 
-// MARK: - Error Types (Following Apple Guidelines)
+@MainActor
+final class HealthKitManager: ObservableObject {
+    static let shared = HealthKitManager()
+    private let healthStore = HKHealthStore()
+    private let calendar = Calendar.current
 
-enum HealthKitError: Error, LocalizedError {
-    case healthDataNotAvailable
-    case permissionDenied
-    case dataUnavailable
-    case invalidData
-    case queryFailed
+    // Published so SwiftUI can bind
+    @Published var vo2Max30: [HealthMetricPoint] = []
+    @Published var hrv30: [HealthMetricPoint] = []
+    @Published var rhr30: [HealthMetricPoint] = []
+    @Published var weight30: [HealthMetricPoint] = []
     
-    var errorDescription: String? {
-        switch self {
-        case .healthDataNotAvailable:
-            return "HealthKit is not available on this device"
-        case .permissionDenied:
-            return "HealthKit permissions are required to access health data"
-        case .dataUnavailable:
-            return "Health data is not available for the selected date"
-        case .invalidData:
-            return "Invalid health data received"
-        case .queryFailed:
-            return "Failed to query health data"
+    // Basic metrics for HomeView
+    @Published var todaySteps: Double = 0
+    @Published var todayHeartRate: Double = 0
+    @Published var todayActiveEnergy: Double = 0
+    @Published var todaySleepHours: Double = 0
+
+    // Authorization state
+    @Published var hasPermission = false
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+
+    // keep references
+    private var observerQueries: [HKSampleType: HKObserverQuery] = [:]
+    private var anchoredQueries: [HKSampleType: HKAnchoredObjectQuery] = [:]
+    
+    private init() {
+        checkInitialPermission()
+    }
+
+    // All read types your app needs (include any types home or biology uses)
+    var readTypes: Set<HKObjectType> {
+        let q = [
+            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned),
+            HKQuantityType.quantityType(forIdentifier: .heartRate),
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
+            HKQuantityType.quantityType(forIdentifier: .stepCount),
+            HKQuantityType.quantityType(forIdentifier: .vo2Max),
+            HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN),
+            HKQuantityType.quantityType(forIdentifier: .restingHeartRate),
+            HKQuantityType.quantityType(forIdentifier: .bodyMass),
+            HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage),
+            HKQuantityType.quantityType(forIdentifier: .height),
+            HKQuantityType.quantityType(forIdentifier: .leanBodyMass)
+        ].compactMap { $0 }
+        return Set(q)
+    }
+
+    // MARK: - Initial Permission Check
+    private func checkInitialPermission() {
+        Task {
+            await updatePermissionStatus()
         }
     }
     
-    var recoverySuggestion: String? {
-        switch self {
-        case .healthDataNotAvailable:
-            return "HealthKit is only available on iOS devices"
-        case .permissionDenied:
-            return "Please grant HealthKit permissions in Settings > Privacy & Security > Health > Bioloop"
-        case .dataUnavailable:
-            return "Try selecting a different date or ensure your Apple Watch is synced"
-        case .invalidData:
-            return "Please try again or contact support if the issue persists"
-        case .queryFailed:
-            return "Please check your internet connection and try again"
+    private func updatePermissionStatus() async {
+        // Check if we can read at least one basic type
+        if let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+            hasPermission = await probeReadAccess(stepType)
         }
+    }
+
+    // MARK: Authorization
+    func requestAuthorization() async throws -> Bool {
+        try Task.checkCancellation()
+        print("🏥 Requesting HealthKit authorization for ALL app data types...")
+        print("🏥 Requesting access to: \(readTypes.map { $0.identifier })")
+        
+        return try await withCheckedThrowingContinuation { cont in
+            healthStore.requestAuthorization(toShare: nil, read: readTypes) { success, error in
+                if let e = error { 
+                    print("🏥 Authorization error: \(e)")
+                    cont.resume(throwing: e)
+            return
+        }
+                print("🏥 Authorization request completed: \(success)")
+                cont.resume(returning: success)
+            }
+        }
+    }
+    
+    /// Centralized authorization method for all app views
+    func requestAuthorizationIfNeeded() async -> Bool {
+        // If we already have permission, return immediately
+        if hasPermission {
+            print("🏥 Already have HealthKit permission")
+            return true
+        }
+        
+        print("🏥 Requesting HealthKit authorization for all app data types...")
+        do {
+            let success = try await requestAuthorization()
+            await updatePermissionStatus()
+            
+            if success && hasPermission {
+                print("🏥 Authorization successful - loading data and starting observers")
+                await loadTodayData()
+                await loadBiology30Days()
+                startObservers()
+            }
+            
+            return success && hasPermission
+        } catch {
+            print("🏥 Authorization error: \(error)")
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+    
+    // Probe: check readability (limit=1), returns true if we can read at least one sample
+    func probeReadAccess(_ sampleType: HKSampleType) async -> Bool {
+        do {
+            if let _ = try await fetchLatestSample(sampleType) { 
+                print("🏥 Can read \(sampleType.identifier)")
+                return true 
+            }
+            print("🏥 Cannot read \(sampleType.identifier) - no samples")
+            return false
+        } catch {
+            print("🏥 Cannot read \(sampleType.identifier) - error: \(error)")
+            return false
+        }
+    }
+
+    // MARK: Latest sample (LKV)
+    func fetchLatestSample(_ sampleType: HKSampleType) async throws -> HKSample? {
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { cont in
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(sampleType: sampleType, predicate: nil, limit: 1, sortDescriptors: [sort]) { _, samples, error in
+                if let e = error { cont.resume(throwing: e); return }
+                cont.resume(returning: samples?.first)
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    // MARK: Daily series via HKStatisticsCollectionQuery
+    /// options example: .cumulativeSum for steps/energy, .discreteAverage for RHR
+    func fetchDailySeries(quantityType: HKQuantityType, unit: HKUnit, startDate: Date, endDate: Date, options: HKStatisticsOptions) async throws -> [Date: Double] {
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { cont in
+            let anchor = calendar.startOfDay(for: startDate)
+            var interval = DateComponents()
+            interval.day = 1
+
+            let query = HKStatisticsCollectionQuery(quantityType: quantityType,
+                                                    quantitySamplePredicate: nil,
+                                                    options: options,
+                                                    anchorDate: anchor,
+                                                    intervalComponents: interval)
+
+            query.initialResultsHandler = { _, results, error in
+                if let e = error { cont.resume(throwing: e); return }
+                var map: [Date: Double] = [:]
+                results?.enumerateStatistics(from: startDate, to: endDate) { stat, _ in
+                    let day = self.calendar.startOfDay(for: stat.startDate)
+                    if let qty = (options.contains(.cumulativeSum) ? stat.sumQuantity() : stat.averageQuantity()) {
+                        let v = qty.doubleValue(for: unit)
+                        map[day] = v
+                        print("🏥 \(quantityType.identifier) for \(day): \(v)")
+            } else {
+                        // no sample for this day -> skip (LKV handled by caller)
+                    }
+                }
+                print("🏥 Statistics collection result for \(quantityType.identifier): \(map.count) days with data")
+                cont.resume(returning: map)
+            }
+            self.healthStore.execute(query)
+        }
+    }
+
+    // MARK: Sleep (HKCategorySample) aggregation per day — returns seconds per day
+    func fetchSleepDaily(startDate: Date, endDate: Date) async throws -> [Date: TimeInterval] {
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { cont in
+            let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
+            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                if let e = error { cont.resume(throwing: e); return }
+                var daily: [Date: TimeInterval] = [:]
+                let samples = samples as? [HKCategorySample] ?? []
+                for s in samples {
+                    // consider only "asleep"
+                    if s.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue ||
+                       s.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue ||
+                       s.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue ||
+                       s.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue {
+                        // split across midnight
+                        var curStart = s.startDate
+                        while curStart < s.endDate {
+                            let dayStart = self.calendar.startOfDay(for: curStart)
+                            guard let dayEnd = self.calendar.date(byAdding: .day, value: 1, to: dayStart) else { break }
+                            let chunkEnd = min(dayEnd, s.endDate)
+                            let delta = chunkEnd.timeIntervalSince(curStart)
+                            daily[dayStart, default: 0] += delta
+                            curStart = chunkEnd
+                        }
+                    }
+                }
+                cont.resume(returning: daily)
+            }
+            self.healthStore.execute(query)
+        }
+    }
+
+    // MARK: Backfill helper: lastKnownValue per type
+    func lastKnownValue(for quantityType: HKQuantityType, valueUnit: HKUnit) async throws -> (value: Double, date: Date)? {
+        if let sample = try await fetchLatestSample(quantityType) as? HKQuantitySample {
+            let qty = sample.quantity
+            return (qty.doubleValue(for: valueUnit), sample.endDate)
+        }
+        return nil
+    }
+
+    // MARK: Load today's basic metrics
+    func loadTodayData() async {
+        guard hasPermission else {
+            print("🏥 Cannot load today's data - no permission")
+            return 
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        let today = Date()
+        let startOfDay = calendar.startOfDay(for: today)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            isLoading = false
+            return
+        }
+        
+        print("🏥 Loading today's data from \(startOfDay) to \(endOfDay)")
+        
+        do {
+            // Load steps
+            if let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+                let map = try await fetchDailySeries(quantityType: stepType, unit: .count(), startDate: startOfDay, endDate: endOfDay, options: .cumulativeSum)
+                todaySteps = map[startOfDay] ?? 0
+                print("🏥 Today's steps: \(todaySteps)")
+            }
+            
+            // Load heart rate
+            if let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) {
+                let map = try await fetchDailySeries(quantityType: hrType, unit: .count().unitDivided(by: .minute()), startDate: startOfDay, endDate: endOfDay, options: .discreteAverage)
+                todayHeartRate = map[startOfDay] ?? 0
+                print("🏥 Today's heart rate: \(todayHeartRate)")
+            }
+            
+            // Load active energy
+            if let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+                let map = try await fetchDailySeries(quantityType: energyType, unit: .kilocalorie(), startDate: startOfDay, endDate: endOfDay, options: .cumulativeSum)
+                todayActiveEnergy = map[startOfDay] ?? 0
+                print("🏥 Today's active energy: \(todayActiveEnergy)")
+            }
+            
+            // Load sleep
+            let sleepMap = try await fetchSleepDaily(startDate: startOfDay, endDate: endOfDay)
+            todaySleepHours = (sleepMap[startOfDay] ?? 0) / 3600
+            print("🏥 Today's sleep: \(todaySleepHours) hours")
+            
+        } catch {
+            print("🏥 Error loading today's data: \(error)")
+            errorMessage = error.localizedDescription
+        }
+        
+        isLoading = false
+    }
+    
+    // MARK: Latest Sample Fetchers (immediate data)
+    func loadLatestSamples() async {
+        print("🏥 Fetching latest samples for immediate display...")
+        
+        // VO₂ Max - latest sample
+        if let vo2Type = HKQuantityType.quantityType(forIdentifier: .vo2Max) {
+            if let latest = try? await fetchLatestSample(vo2Type) as? HKQuantitySample {
+                let vo2Value = latest.quantity.doubleValue(for: HKUnit(from: "ml/kg·min"))
+                let point = HealthMetricPoint(date: latest.endDate, value: vo2Value)
+                await MainActor.run {
+                    self.vo2Max30 = [point] // Start with latest, will be filled with historical
+                }
+                print("🏥 Latest VO₂ Max: \(vo2Value) ml/kg·min")
+        } else {
+                print("🏥 No VO₂ Max data available")
+            }
+        }
+        
+        // HRV - latest sample
+        if let hrvType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            if let latest = try? await fetchLatestSample(hrvType) as? HKQuantitySample {
+                let hrvValue = latest.quantity.doubleValue(for: .secondUnit(with: .milli))
+                let point = HealthMetricPoint(date: latest.endDate, value: hrvValue)
+                await MainActor.run {
+                    self.hrv30 = [point]
+                }
+                print("🏥 Latest HRV: \(hrvValue) ms")
+        } else {
+                print("🏥 No HRV data available")
+            }
+        }
+        
+        // Resting Heart Rate - latest sample
+        if let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
+            if let latest = try? await fetchLatestSample(rhrType) as? HKQuantitySample {
+                let rhrValue = latest.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+                let point = HealthMetricPoint(date: latest.endDate, value: rhrValue)
+                await MainActor.run {
+                    self.rhr30 = [point]
+                }
+                print("🏥 Latest RHR: \(rhrValue) BPM")
+        } else {
+                print("🏥 No RHR data available")
+            }
+        }
+        
+        // Weight - latest sample
+        if let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
+            if let latest = try? await fetchLatestSample(weightType) as? HKQuantitySample {
+                let weightValue = latest.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                let point = HealthMetricPoint(date: latest.endDate, value: weightValue)
+                await MainActor.run {
+                    self.weight30 = [point]
+                }
+                print("🏥 Latest Weight: \(weightValue) kg")
+                    } else {
+                print("🏥 No Weight data available")
+            }
+        }
+    }
+    
+    // MARK: High-level loader for 30-day biology data
+    func loadBiology30Days() async {
+        print("🏥 Loading biology data - starting with latest samples...")
+        
+        // First, get the latest samples to ensure we have some data immediately
+        await loadLatestSamples()
+        let now = Date()
+        guard let start = calendar.date(byAdding: .day, value: -29, to: calendar.startOfDay(for: now)) else { return }
+        
+        print("🏥 Loading 30-day biology data from \(start) to \(now)")
+
+        // VO2 Max: use .discreteAverage - Apple stores as ml/kg/min
+        if let vo2Type = HKQuantityType.quantityType(forIdentifier: .vo2Max) {
+            do {
+                let map = try await fetchDailySeries(quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"), startDate: start, endDate: now, options: .discreteAverage)
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"))
+                await MainActor.run {
+                    self.vo2Max30 = filled
+                }
+                print("🏥 VO2 Max 30-day data loaded: \(filled.count) points")
+        } catch {
+                print("🏥 VO2 Max error: \(error), using LKV fallback")
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: vo2Type, unit: HKUnit(from: "ml/kg·min"))
+                await MainActor.run {
+                    self.vo2Max30 = filled
+                }
+            }
+        }
+
+        // HRV: fetch latest samples (HRV is stored in ms)
+        if let hrvType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            do {
+                let map = try await fetchDailySeries(quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli), startDate: start, endDate: now, options: .discreteAverage)
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli))
+                await MainActor.run {
+                    self.hrv30 = filled
+                }
+                print("🏥 HRV 30-day data loaded: \(filled.count) points")
+            } catch {
+                print("🏥 HRV error: \(error), using LKV fallback")
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: hrvType, unit: HKUnit.secondUnit(with: .milli))
+            await MainActor.run {
+                    self.hrv30 = filled
+                }
+            }
+        }
+
+        // RHR
+        if let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
+            do {
+                let map = try await fetchDailySeries(quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()), startDate: start, endDate: now, options: .discreteAverage)
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()))
+                await MainActor.run {
+                    self.rhr30 = filled
+                }
+                print("🏥 RHR 30-day data loaded: \(filled.count) points")
+            } catch {
+                print("🏥 RHR error: \(error), using LKV fallback")
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: rhrType, unit: HKUnit.count().unitDivided(by: HKUnit.minute()))
+            await MainActor.run {
+                    self.rhr30 = filled
+                }
+            }
+        }
+
+        // Body Mass (weight)
+        if let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
+            do {
+                let map = try await fetchDailySeries(quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo), startDate: start, endDate: now, options: .discreteAverage)
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: map, quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo))
+                await MainActor.run {
+                    self.weight30 = filled
+                }
+                print("🏥 Weight 30-day data loaded: \(filled.count) points")
+            } catch {
+                print("🏥 Weight error: \(error), using LKV fallback")
+                let filled = await self.fillDailyMapWithLKVIfNeeded(targetDays: 30, startDate: start, sourceMap: [:], quantityType: weightType, unit: HKUnit.gramUnit(with: .kilo))
+            await MainActor.run {
+                    self.weight30 = filled
+                }
+            }
+        }
+        
+        print("🏥 Biology 30-day data loading completed")
+    }
+
+    // MARK: Helper: fill map with LKV fallback (produces [HealthMetricPoint] array)
+    func fillDailyMapWithLKVIfNeeded(targetDays: Int, startDate: Date, sourceMap: [Date: Double], quantityType: HKQuantityType, unit: HKUnit) async -> [HealthMetricPoint] {
+        var result: [HealthMetricPoint] = []
+        var lastKnown: Double? = nil
+
+        // get last known if needed
+        if let lkv = try? await lastKnownValue(for: quantityType, valueUnit: unit) {
+            lastKnown = lkv.value
+            print("🏥 LKV for \(quantityType.identifier): \(lkv.value) from \(lkv.date)")
+        }
+
+        for i in 0..<targetDays {
+            guard let day = calendar.date(byAdding: .day, value: i, to: startDate) else { continue }
+            let dayStart = calendar.startOfDay(for: day)
+            if let v = sourceMap[dayStart] {
+                result.append(.init(date: day, value: v))
+                lastKnown = v
+            } else if let lkv = lastKnown {
+                // backfill with last known
+                result.append(.init(date: day, value: lkv))
+            } else {
+                // no data & no lkv -> 0 or nil. Use 0 to keep arrays uniform; UI can treat 0 specially.
+                result.append(.init(date: day, value: 0))
+            }
+        }
+        return result
+    }
+
+    // MARK: Observers & Anchored queries (incremental updates)
+    func startObservers() {
+        let sampleTypes: [HKSampleType] = [
+            HKQuantityType.quantityType(forIdentifier: .bodyMass)!,
+            HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!,
+            HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
+            HKQuantityType.quantityType(forIdentifier: .vo2Max)!,
+            HKQuantityType.quantityType(forIdentifier: .stepCount)!,
+            HKQuantityType.quantityType(forIdentifier: .heartRate)!,
+            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
+        ]
+
+        for type in sampleTypes {
+            if observerQueries[type] != nil { continue }
+            let observer = HKObserverQuery(sampleType: type, predicate: nil) { [weak self] _, completionHandler, error in
+                print("🔍 Observer fired for \(type.identifier)")
+                Task {
+                    await self?.handleObserverFired(for: type)
+                    completionHandler()
+                }
+            }
+            observerQueries[type] = observer
+            healthStore.execute(observer)
+            healthStore.enableBackgroundDelivery(for: type, frequency: .immediate) { success, err in
+                print("📱 Background delivery \(success ? "enabled" : "failed") for \(type.identifier)")
+            }
+        }
+        print("🔍 Started observers for \(sampleTypes.count) sample types")
+    }
+
+    private func handleObserverFired(for sampleType: HKSampleType) async {
+        print("🔍 Handling observer fired for \(sampleType.identifier)")
+        // anchored fetch
+        let anchor = loadAnchor(for: sampleType)
+        let anchoredQuery = HKAnchoredObjectQuery(type: sampleType, predicate: nil, anchor: anchor, limit: HKObjectQueryNoLimit) { [weak self] _, samplesOrNil, deletedObjects, newAnchor, error in
+                if let error = error {
+                print("🔍 Anchored query error for \(sampleType.identifier): \(error)")
+                    return
+                }
+                
+            if let samples = samplesOrNil, !samples.isEmpty {
+                print("🔍 Received \(samples.count) new samples for \(sampleType.identifier)")
+            }
+            
+            // process newly arrived samples if any
+            if let newAnchor = newAnchor {
+                Task { @MainActor in
+                    self?.saveAnchor(newAnchor, for: sampleType)
+                }
+            }
+            Task {
+                // re-run historical load for relevant metric
+                await self?.loadBiology30Days()
+                await self?.loadTodayData()
+            }
+        }
+        anchoredQuery.updateHandler = { [weak self] _, samples, deleted, newAnchor, _ in
+            if let newAnchor = newAnchor { 
+                Task { @MainActor in
+                    self?.saveAnchor(newAnchor, for: sampleType)
+                }
+            }
+            Task {
+                await self?.loadBiology30Days()
+                await self?.loadTodayData()
+            }
+        }
+        anchoredQueries[sampleType] = anchoredQuery
+        healthStore.execute(anchoredQuery)
+    }
+
+    // Anchor persistence
+    private func anchorFileURL(for type: HKSampleType) -> URL {
+        let filename = "anchor_\(type.identifier).bin"
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return dir.appendingPathComponent(filename)
+    }
+
+    private func saveAnchor(_ anchor: HKQueryAnchor, for type: HKSampleType) {
+        do {
+            let data = try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
+            try data.write(to: anchorFileURL(for: type), options: .atomic)
+            print("📌 Saved anchor for \(type.identifier)")
+        } catch {
+            print("❌ Failed to save anchor for \(type.identifier): \(error)")
+        }
+    }
+
+    private func loadAnchor(for type: HKSampleType) -> HKQueryAnchor? {
+        let url = anchorFileURL(for: type)
+        guard let data = try? Data(contentsOf: url) else { 
+            print("📌 No saved anchor found for \(type.identifier)")
+            return nil 
+        }
+        let anchor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+        if anchor != nil {
+            print("📌 Loaded anchor for \(type.identifier)")
+        }
+        return anchor
+    }
+    
+    // MARK: - Refresh authorization status
+    func refreshAuthorizationStatus() async {
+        print("🔄 Refreshing authorization status")
+        await updatePermissionStatus()
     }
 }
