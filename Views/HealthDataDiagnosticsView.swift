@@ -90,9 +90,9 @@ struct HealthDataDiagnosticsView: View {
                         Text("Computed Scores")
                             .font(.headline)
                         
-                        MetricRow(label: "Recovery Score", value: "\(viewModel.recoveryScore)")
-                        MetricRow(label: "Sleep Score", value: "\(viewModel.sleepScore)")
-                        MetricRow(label: "Strain Score", value: "\(viewModel.strainScore)")
+                        MetricRow(label: "Recovery Score", value: scoreText(viewModel.recoveryScoreState))
+                        MetricRow(label: "Sleep Score", value: scoreText(viewModel.sleepScoreState))
+                        MetricRow(label: "Strain Score", value: scoreText(viewModel.strainScoreState))
                     }
                     .padding()
                     .background(Color(.systemGray6))
@@ -148,6 +148,14 @@ struct HealthDataDiagnosticsView: View {
             .onAppear {
                 print("🔍 Diagnostics view appeared")
             }
+        }
+    }
+
+    private func scoreText(_ state: HomeViewModel.ScoreState) -> String {
+        switch state {
+        case .pending: return "pending"
+        case .unavailable: return "—"
+        case .computed(let v): return String(v)
         }
     }
     

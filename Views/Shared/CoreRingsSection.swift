@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct CoreRingsSection: View {
-    let recoveryScore: Double
-    let sleepScore: Double
-    let strainScore: Double
+    let recoveryState: HomeViewModel.ScoreState
+    let sleepState: HomeViewModel.ScoreState
+    let strainState: HomeViewModel.ScoreState
     let coachingMessage: CoachingMessage?
     
     var body: some View {
@@ -12,11 +12,7 @@ struct CoreRingsSection: View {
             HStack(spacing: 30) {
                 // Strain ring
                 VStack(spacing: 8) {
-                    CircularProgressRing(
-                        value: strainScore,
-                        color: .orange,
-                        size: 80
-                    )
+                    RingView(state: strainState, color: .orange)
                     Text("Strain")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.secondary)
@@ -24,11 +20,7 @@ struct CoreRingsSection: View {
                 
                 // Recovery ring
                 VStack(spacing: 8) {
-                    CircularProgressRing(
-                        value: recoveryScore,
-                        color: .green,
-                        size: 80
-                    )
+                    RingView(state: recoveryState, color: .green)
                     Text("Recovery")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.secondary)
@@ -36,11 +28,7 @@ struct CoreRingsSection: View {
                 
                 // Sleep ring
                 VStack(spacing: 8) {
-                    CircularProgressRing(
-                        value: sleepScore,
-                        color: .blue,
-                        size: 80
-                    )
+                    RingView(state: sleepState, color: .blue)
                     Text("Sleep")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.secondary)
@@ -73,12 +61,54 @@ struct CoreRingsSection: View {
     }
 }
 
+private struct RingView: View {
+    let state: HomeViewModel.ScoreState
+    let color: Color
+    let size: CGFloat = 80
+    
+    var body: some View {
+        switch state {
+        case .pending:
+            ZStack {
+                Circle()
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 8)
+                    .frame(width: size, height: size)
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.gray)
+            }
+        case .unavailable:
+            ZStack {
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 8)
+                    .frame(width: size, height: size)
+                Image(systemName: "slash.circle")
+                    .foregroundColor(.gray)
+            }
+        case .computed(let value):
+            ZStack {
+                CircularProgressRing(
+                    value: Double(value),
+                    maxValue: 100,
+                    lineWidth: 10,
+                    color: color,
+                    showValue: false,
+                    size: size
+                )
+                Text("\(value)")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+        }
+    }
+}
+
 struct CoreRingsSection_Previews: PreviewProvider {
     static var previews: some View {
         CoreRingsSection(
-            recoveryScore: 95,
-            sleepScore: 73,
-            strainScore: 25,
+            recoveryState: .computed(95),
+            sleepState: .pending,
+            strainState: .unavailable,
             coachingMessage: CoachingMessage(
                 message: "Excellent recovery! Target a Strain level of 24% - 62% for optimal training today.",
                 type: .recovery,

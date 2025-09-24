@@ -7,12 +7,20 @@ final class HomeViewModel: ObservableObject {
     static let shared = HomeViewModel()
 
     private let dataManager = DataManager.shared
+    private let scoreManager = ScoreManager.shared
     private var cancellables = Set<AnyCancellable>()
 
+    // Score tri-state
+    enum ScoreState: Equatable {
+        case pending
+        case computed(Int)
+        case unavailable
+    }
+    
     // Published UI state
-    @Published var recoveryScore: Int = 0
-    @Published var sleepScore: Int = 0
-    @Published var strainScore: Int = 0
+    @Published var recoveryScoreState: ScoreState = .pending
+    @Published var sleepScoreState: ScoreState = .pending
+    @Published var strainScoreState: ScoreState = .pending
     
     // Raw metrics for display
     @Published var latestRHR: Double? = nil
@@ -38,26 +46,72 @@ final class HomeViewModel: ObservableObject {
     // Coaching message
     @Published var coachingMessage: String = "Welcome to Bioloop! Connect your health data to get started."
 
+    // Temporary compatibility for existing UI (to be removed after UI migration)
+    var recoveryScore: Int {
+        if case .computed(let v) = recoveryScoreState { return v }
+        return 0
+    }
+    var sleepScore: Int {
+        if case .computed(let v) = sleepScoreState { return v }
+        return 0
+    }
+    var strainScore: Int {
+        if case .computed(let v) = strainScoreState { return v }
+        return 0
+    }
+
+    // Snapshot logic now delegated to ScoreManager (pipelines). Keep minimal compatibility.
+    private let snapshotRequest = PassthroughSubject<Void, Never>()
+    private var snapshotCancellable: AnyCancellable?
+
     init() {
         setupSubscriptions()
         // Morning snapshot will be computed once when first data arrives
+        snapshotCancellable = snapshotRequest
+            .debounce(for: .seconds(HealthMetricsConfiguration.snapshotDebounceInterval), scheduler: RunLoop.main)
+            .sink { [weak self] in
+                print("⏱️ Debounced snapshotRequest fired (handled by ScoreManager pipelines)")
+            }
     }
 
     private func setupSubscriptions() {
         print("🔗 Setting up HomeViewModel subscriptions...")
         
-        // Subscribe to DataManager's series data (which are @Published)
+        // Bridge ScoreManager outputs into HomeViewModel UI states
+        scoreManager.$recoveryScoreState
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                self?.recoveryScoreState = state
+                self?.updateCoachingMessage()
+            }
+            .store(in: &cancellables)
+
+        scoreManager.$sleepScoreState
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                self?.sleepScoreState = state
+                self?.updateCoachingMessage()
+            }
+            .store(in: &cancellables)
+
+        scoreManager.$strainScoreState
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                self?.strainScoreState = state
+                self?.updateCoachingMessage()
+            }
+            .store(in: &cancellables)
+
+        // Subscribe to DataManager series
         dataManager.$rhrSeries
             .receive(on: RunLoop.main)
             .sink { [weak self] series in
                 print("🔗 RHR series updated: \(series.count) points")
                 self?.latestRHR = series.last?.value
-                self?.attemptMorningSnapshotIfNeeded()
-                // If snapshot already taken but recovery not computed yet, try now when RHR arrives
-                if let self = self, self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
-                    self.recoveryScore = self.computeRecoveryScore()
-                    self.updateCoachingMessage()
-                }
+                let haveRecent = self?.dataManager.hasRecentHRV == true && self?.dataManager.hasRecentRHR == true
+                print("📝 RHR arrived -> requesting snapshot attempt (hasRecentHRV=\(self?.dataManager.hasRecentHRV == true), hasRecentRHR=\(self?.dataManager.hasRecentRHR == true), canCompute=\(haveRecent))")
+                self?.snapshotRequest.send()
+                // ScoreManager handles recovery; VM only updates UI state below
             }
             .store(in: &cancellables)
         
@@ -66,37 +120,15 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 HRV series updated: \(series.count) points")
                 self?.latestHRV = series.last?.value
-                self?.attemptMorningSnapshotIfNeeded()
-                // If snapshot already taken but recovery not computed yet, try now when HRV arrives
-                if let self = self, self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
-                    self.recoveryScore = self.computeRecoveryScore()
-                    self.updateCoachingMessage()
-                }
+                let haveRecent = self?.dataManager.hasRecentHRV == true && self?.dataManager.hasRecentRHR == true
+                print("📝 HRV arrived -> requesting snapshot attempt (hasRecentHRV=\(self?.dataManager.hasRecentHRV == true), hasRecentRHR=\(self?.dataManager.hasRecentRHR == true), canCompute=\(haveRecent))")
+                self?.snapshotRequest.send()
+                // ScoreManager handles recovery; VM only updates UI state below
             }
             .store(in: &cancellables)
 
         // Recompute recovery when recency dates update (avoids race with series updates)
-        dataManager.$latestHRVDate
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                if self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
-                    self.recoveryScore = self.computeRecoveryScore()
-                    self.updateCoachingMessage()
-                }
-            }
-            .store(in: &cancellables)
-
-        dataManager.$latestRHRDate
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                if self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
-                    self.recoveryScore = self.computeRecoveryScore()
-                    self.updateCoachingMessage()
-                }
-            }
-            .store(in: &cancellables)
+        // No longer manually recompute on HRV/RHR date updates; ScoreManager pipelines handle it
         
         dataManager.$vo2MaxSeries
             .receive(on: RunLoop.main)
@@ -116,13 +148,12 @@ final class HomeViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Subscribe to today's metrics
+        // Subscribe to today's metrics (strain handled by ScoreManager; keep UI mirrors)
         dataManager.$todaySteps
             .receive(on: RunLoop.main)
             .sink { [weak self] v in
                 self?.todaySteps = v
-                // Strain is the only score that should live-update during the day
-                self?.strainScore = self?.computeStrainScore() ?? 0
+                // ScoreManager computes; VM mirrors below
             }
             .store(in: &cancellables)
             
@@ -135,8 +166,7 @@ final class HomeViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] v in
                 self?.todayActiveEnergy = v
-                // Update strain only
-                self?.strainScore = self?.computeStrainScore() ?? 0
+                // ScoreManager computes; VM mirrors below
             }
             .store(in: &cancellables)
             
@@ -144,12 +174,8 @@ final class HomeViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] v in
                 self?.todaySleepHours = v
-                // Compute sleep score as soon as valid sleep is available, independent of snapshot
-                if let self = self, self.sleepScore == 0, v > 0 {
-                    self.sleepScore = self.computeSleepScore()
-                    self.updateCoachingMessage()
-                }
-                // Do not trigger recovery snapshot here
+                print("🛌 Sleep updated: \(v)h — not triggering snapshot")
+                // ScoreManager computes; VM mirrors below
             }
             .store(in: &cancellables)
 
@@ -201,94 +227,19 @@ final class HomeViewModel: ObservableObject {
     // MARK: - Score Computation
     
     private func recomputeScoresMorningSnapshot() {
-        print("🧮 Morning snapshot score computation...")
-        recoveryScore = computeRecoveryScore()
-        // Sleep: compute only if not already set
-        if todaySleepHours > 0 && sleepScore == 0 {
-            sleepScore = computeSleepScore()
-        }
-        // Strain will live-update throughout the day from publishers
-        strainScore = computeStrainScore()
-        updateCoachingMessage()
-        print("🧮 Morning snapshot set - Recovery: \(recoveryScore), Sleep: \(sleepScore), Strain: \(strainScore)")
+        print("🧮 Morning snapshot score computation (delegated to ScoreManager pipelines)")
     }
 
     // Compute once when data is available
     private var didTakeMorningSnapshot: Bool = false
     private func attemptMorningSnapshotIfNeeded() {
-        guard !didTakeMorningSnapshot else { return }
-        // Only take snapshot when both HRV and RHR are available (sleep alone should not trigger recovery snapshot)
-        let haveRecoveryInputs = (latestHRV ?? 0) > 0 && (latestRHR ?? 0) > 0
-        if haveRecoveryInputs {
-            recomputeScoresMorningSnapshot()
-            didTakeMorningSnapshot = true
-        }
+        print("🕗 attemptMorningSnapshotIfNeeded called (legacy path)")
+        performSnapshotIfNeeded()
     }
+
+    private func performSnapshotIfNeeded() { /* handled by ScoreManager */ }
     
-    private func computeRecoveryScore() -> Int {
-        // Recovery score should only be calculated if we have recent, valid data
-        guard let hrv = latestHRV, 
-              let rhr = latestRHR,
-              dataManager.hasRecentHRV,
-              dataManager.hasRecentRHR,
-              hrv > 0,
-              rhr > 0 else {
-            print("🧮 Recovery: No recent HRV/RHR data available")
-            return 0
-        }
-        
-        // Enhanced recovery algorithm with more realistic scoring
-        var recoveryScore = 50.0 // Base score
-        
-        // HRV Component (50% weight)
-        // Typical healthy ranges: 20-50ms (varies by age/fitness)
-        let hrvScore: Double
-        if hrv >= 40 {
-            hrvScore = 85 + min(15, (hrv - 40) * 0.5) // Excellent: 85-100
-        } else if hrv >= 30 {
-            hrvScore = 70 + ((hrv - 30) / 10) * 15 // Good: 70-85
-        } else if hrv >= 20 {
-            hrvScore = 50 + ((hrv - 20) / 10) * 20 // Fair: 50-70
-        } else {
-            hrvScore = max(10, hrv * 2.5) // Poor: 10-50
-        }
-        
-        // RHR Component (50% weight)
-        // Typical ranges: 50-100 bpm (lower is generally better)
-        let rhrScore: Double
-        if rhr <= 55 {
-            rhrScore = 90 + min(10, (55 - rhr) * 0.5) // Excellent: 90-100
-        } else if rhr <= 65 {
-            rhrScore = 75 + ((65 - rhr) / 10) * 15 // Good: 75-90
-        } else if rhr <= 80 {
-            rhrScore = 50 + ((80 - rhr) / 15) * 25 // Fair: 50-75
-        } else {
-            rhrScore = max(10, (120 - rhr) * 0.8) // Poor: 10-50
-        }
-        
-        // Combine scores
-        recoveryScore = (hrvScore + rhrScore) / 2
-        
-        // Factor in sleep quality if available
-        if todaySleepHours > 0 {
-            let sleepMultiplier: Double
-            if todaySleepHours >= 7 && todaySleepHours <= 9 {
-                sleepMultiplier = 1.1 // Boost for optimal sleep
-            } else if todaySleepHours >= 6 && todaySleepHours <= 10 {
-                sleepMultiplier = 1.0 // Neutral for decent sleep
-            } else {
-                sleepMultiplier = 0.85 // Penalty for poor sleep
-            }
-            recoveryScore *= sleepMultiplier
-        }
-        
-        // Clamp between 0-100
-        let finalScore = max(0, min(100, recoveryScore))
-        
-        print("🧮 Recovery calculation: HRV=\(hrv)ms (score: \(Int(hrvScore))), RHR=\(rhr)bpm (score: \(Int(rhrScore))), Sleep=\(todaySleepHours)h, Final=\(Int(finalScore))")
-        
-        return Int(finalScore)
-    }
+    // Recovery computation delegated to ScoreManager
     
     private func computeSleepScore() -> Int {
         guard todaySleepHours > 0 else { 
@@ -369,50 +320,42 @@ final class HomeViewModel: ObservableObject {
     private func updateCoachingMessage() {
         if !hasHealthKitPermission {
             coachingMessage = "Connect your health data to see personalized insights!"
-        } else if recoveryScore == 0 && sleepScore == 0 && strainScore == 0 {
+            return
+        }
+        let recoveryVal: Int? = { if case .computed(let v) = recoveryScoreState { return v } else { return nil } }()
+        let sleepVal: Int? = { if case .computed(let v) = sleepScoreState { return v } else { return nil } }()
+        let strainVal: Int? = { if case .computed(let v) = strainScoreState { return v } else { return nil } }()
+        if recoveryVal == nil && sleepVal == nil && strainVal == nil {
             coachingMessage = "Keep wearing your Apple Watch to collect health metrics for personalized insights."
-        } else {
-            // Generate coaching based on available scores
-            var messages: [String] = []
-            
-            // Recovery-based coaching
-            if recoveryScore > 0 {
-                if recoveryScore >= 85 {
-                    messages.append("Excellent recovery! Your body is primed for high-intensity activities.")
-                } else if recoveryScore >= 70 {
-                    messages.append("Good recovery. You're ready for moderate to high activity.")
-                } else if recoveryScore >= 50 {
-                    messages.append("Fair recovery. Consider light to moderate activity today.")
-                } else {
-                    messages.append("Low recovery detected. Focus on rest and stress management.")
-                }
-            }
-            
-            // Sleep-based coaching
-            if sleepScore > 0 {
-                if sleepScore >= 85 {
-                    messages.append("Great sleep quality!")
-                } else if sleepScore < 50 {
-                    messages.append("Consider improving your sleep routine for better recovery.")
-                }
-            }
-            
-            // Strain-based coaching
-            if strainScore > 0 {
-                if strainScore < 30 {
-                    messages.append("Low activity detected. Try to increase your daily movement.")
-                } else if strainScore >= 80 {
-                    messages.append("High activity level - great job staying active!")
-                }
-            }
-            
-            // Combine messages or use default
-            if messages.isEmpty {
-                coachingMessage = "Gathering your health data... Wear your Apple Watch for better insights."
+            return
+        }
+        var messages: [String] = []
+        if let r = recoveryVal {
+            if r >= 85 {
+                messages.append("Excellent recovery! Your body is primed for high-intensity activities.")
+            } else if r >= 70 {
+                messages.append("Good recovery. You're ready for moderate to high activity.")
+            } else if r >= 50 {
+                messages.append("Fair recovery. Consider light to moderate activity today.")
             } else {
-                coachingMessage = messages.joined(separator: " ")
+                messages.append("Low recovery detected. Focus on rest and stress management.")
             }
         }
+        if let s = sleepVal {
+            if s >= 85 {
+                messages.append("Great sleep quality!")
+            } else if s < 50 {
+                messages.append("Consider improving your sleep routine for better recovery.")
+            }
+        }
+        if let st = strainVal {
+            if st < 30 {
+                messages.append("Low activity detected. Try to increase your daily movement.")
+            } else if st >= 80 {
+                messages.append("High activity level - great job staying active!")
+            }
+        }
+        coachingMessage = messages.isEmpty ? "Gathering your health data... Wear your Apple Watch for better insights." : messages.joined(separator: " ")
     }
     
     // MARK: - Public API
@@ -435,9 +378,12 @@ final class HomeViewModel: ObservableObject {
     func loadScores(for date: Date) async {
         print("🔄 Loading scores for selected date: \(date)")
         let score = await dataManager.scores(on: date)
-        self.recoveryScore = Int(score.recovery.value)
-        self.sleepScore = Int(score.sleep.value)
-        self.strainScore = Int(score.strain.value)
+        let r = Int(score.recovery.value)
+        let s = Int(score.sleep.value)
+        let st = Int(score.strain.value)
+        self.recoveryScoreState = r > 0 ? .computed(r) : .unavailable
+        self.sleepScoreState = s > 0 ? .computed(s) : .unavailable
+        self.strainScoreState = st > 0 ? .computed(st) : .unavailable
         self.updateCoachingMessage()
     }
     

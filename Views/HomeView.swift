@@ -36,9 +36,9 @@ struct HomeView: View {
                             VStack(spacing: 20) {
                                 // Core rings section - Quick Glance at Recovery, Strain, Sleep
                                 CoreRingsSection(
-                                    recoveryScore: Double(viewModel.recoveryScore),
-                                    sleepScore: Double(viewModel.sleepScore),
-                                    strainScore: Double(viewModel.strainScore),
+                                    recoveryState: viewModel.recoveryScoreState,
+                                    sleepState: viewModel.sleepScoreState,
+                                    strainState: viewModel.strainScoreState,
                                     coachingMessage: CoachingMessage(
                                         message: viewModel.coachingMessage,
                                         type: .general,

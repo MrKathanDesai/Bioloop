@@ -261,6 +261,13 @@ struct Constants {
     }
 }
 
+// MARK: - Health Metrics Configuration
+struct HealthMetricsConfiguration {
+    static let recencyWindowWatch: TimeInterval = 7 * 24 * 60 * 60
+    static let displayWindow: TimeInterval = 365 * 24 * 60 * 60
+    static let snapshotDebounceInterval: TimeInterval = 1.0
+}
+
 // Keeping existing AppConstants for backward compatibility  
 struct AppConstants {
     

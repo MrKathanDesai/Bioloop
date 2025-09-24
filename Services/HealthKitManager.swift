@@ -679,7 +679,7 @@ final class HealthKitManager: ObservableObject {
                 let vo2Value = latest.quantity.doubleValue(for: HKUnit(from: "ml/kg·min"))
                 let point = HealthMetricPoint(date: latest.endDate, value: vo2Value)
                 await MainActor.run {
-                    self.vo2Max30 = [point] // Start with latest, will be filled with historical
+                    if self.vo2Max30.isEmpty { self.vo2Max30 = [point] }
                 }
                 print("🏥 Latest VO₂ Max: \(vo2Value) ml/kg·min")
         } else {
@@ -693,7 +693,7 @@ final class HealthKitManager: ObservableObject {
                 let hrvValue = latest.quantity.doubleValue(for: .secondUnit(with: .milli))
                 let point = HealthMetricPoint(date: latest.endDate, value: hrvValue)
                 await MainActor.run {
-                    self.hrv30 = [point]
+                    if self.hrv30.isEmpty { self.hrv30 = [point] }
                 }
                 print("🏥 Latest HRV: \(hrvValue) ms")
         } else {
@@ -707,7 +707,7 @@ final class HealthKitManager: ObservableObject {
                 let rhrValue = latest.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
                 let point = HealthMetricPoint(date: latest.endDate, value: rhrValue)
                 await MainActor.run {
-                    self.rhr30 = [point]
+                    if self.rhr30.isEmpty { self.rhr30 = [point] }
                 }
                 print("🏥 Latest RHR: \(rhrValue) BPM")
         } else {
@@ -721,7 +721,7 @@ final class HealthKitManager: ObservableObject {
                 let weightValue = latest.quantity.doubleValue(for: .gramUnit(with: .kilo))
                 let point = HealthMetricPoint(date: latest.endDate, value: weightValue)
                 await MainActor.run {
-                    self.weight30 = [point]
+                    if self.weight30.isEmpty { self.weight30 = [point] }
                 }
                 print("🏥 Latest Weight: \(weightValue) kg")
                     } else {
