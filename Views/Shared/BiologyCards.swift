@@ -740,21 +740,21 @@ struct HealthScoreCard: View {
             
             if hasRecentData && overallScore > 0 {
                 HStack(alignment: .center, spacing: 12) {
-                    // Score text (left)
-                    VStack(alignment: .leading, spacing: 6) {
+                    // Score text (centered within its half)
+                    VStack(alignment: .center, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(scoreGrade)
-                                .font(.system(size: 30, weight: .semibold))
+                                .font(.system(size: 32, weight: .bold))
                                 .foregroundColor(scoreColor)
                             Text(String(format: "%.0f", overallScore))
-                                .font(.system(size: 18, weight: .medium))
+                                .font(.system(size: 20, weight: .semibold))
                                 .foregroundColor(BiologyColors.subtext)
                         }
                         Text(fitnessLevel)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(scoreColor)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                     // Ring (right)
                     ZStack {
