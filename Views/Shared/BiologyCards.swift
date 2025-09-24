@@ -437,14 +437,12 @@ struct BodyCompositionCard: View {
                     .font(.system(size: 16))
                     .foregroundColor(hasData ? BiologyColors.primary : BiologyColors.muted)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Body")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(BiologyColors.text)
-                    Text("Composition")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(BiologyColors.text)
-                }
+                Text("Body Composition")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(BiologyColors.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .allowsTightening(true)
                 
                 Spacer()
             }
@@ -484,7 +482,7 @@ struct BodyCompositionCard: View {
                     .foregroundStyle(BiologyColors.violet)
                     .opacity(0.8)
                 }
-                .frame(height: 80)
+                .frame(height: 100)
                 
                 // Legend - showing all 4 components with total verification
                 VStack(spacing: 4) {
@@ -727,14 +725,12 @@ struct HealthScoreCard: View {
                     .font(.system(size: 16))
                     .foregroundColor(hasRecentData ? scoreColor : BiologyColors.muted)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Health")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(BiologyColors.text)
-                    Text("Score")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(BiologyColors.text)
-                }
+                Text("Health Score")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(BiologyColors.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .allowsTightening(true)
                 
                 Spacer()
             }
@@ -762,12 +758,12 @@ struct HealthScoreCard: View {
                 ZStack {
                     Circle()
                         .stroke(BiologyColors.grid, lineWidth: 4)
-                        .frame(width: 60, height: 60)
+                        .frame(width: 68, height: 68)
                     
                     Circle()
                         .trim(from: 0, to: overallScore / 100)
                         .stroke(scoreColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 60, height: 60)
+                        .frame(width: 68, height: 68)
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 1), value: overallScore)
                     
@@ -775,6 +771,7 @@ struct HealthScoreCard: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(scoreColor)
                 }
+                .frame(height: 80)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Not Enough Data Yet")
