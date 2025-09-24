@@ -151,6 +151,13 @@ final class HealthKitManager: ObservableObject {
         // If we already have permission, return immediately
         if hasPermission {
             print("🏥 Already have HealthKit permission")
+            // Ensure data is loaded on app relaunch/foreground even if permission already granted
+            await loadTodayData()
+            await loadBiology30Days()
+            await loadActivity30Days()
+            await loadWorkouts30Days()
+            await loadLatestSamples()
+            startObservers()
             return true
         }
         

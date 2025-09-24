@@ -25,6 +25,10 @@ final class HomeViewModel: ObservableObject {
     @Published var todayHeartRate: Double = 0
     @Published var todayActiveEnergy: Double = 0
     @Published var todaySleepHours: Double = 0
+    @Published var todayDietaryEnergy: Double = 0
+    @Published var todayProteinGrams: Double = 0
+    @Published var todayCarbsGrams: Double = 0
+    @Published var todayFatGrams: Double = 0
     
     // Authorization state
     @Published var hasHealthKitPermission: Bool = false
@@ -36,8 +40,7 @@ final class HomeViewModel: ObservableObject {
 
     init() {
         setupSubscriptions()
-        // Preserve previous working live/today behavior: compute once at init
-        recomputeScoresMorningSnapshot()
+        // Morning snapshot will be computed once when first data arrives
     }
 
     private func setupSubscriptions() {
@@ -49,7 +52,12 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 RHR series updated: \(series.count) points")
                 self?.latestRHR = series.last?.value
-                // Recovery should be fixed for the day; do not auto-recompute here
+                self?.attemptMorningSnapshotIfNeeded()
+                // If snapshot already taken but recovery not computed yet, try now when RHR arrives
+                if let self = self, self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
+                    self.recoveryScore = self.computeRecoveryScore()
+                    self.updateCoachingMessage()
+                }
             }
             .store(in: &cancellables)
         
@@ -58,7 +66,35 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 HRV series updated: \(series.count) points")
                 self?.latestHRV = series.last?.value
-                // Recovery should be fixed for the day; do not auto-recompute here
+                self?.attemptMorningSnapshotIfNeeded()
+                // If snapshot already taken but recovery not computed yet, try now when HRV arrives
+                if let self = self, self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
+                    self.recoveryScore = self.computeRecoveryScore()
+                    self.updateCoachingMessage()
+                }
+            }
+            .store(in: &cancellables)
+
+        // Recompute recovery when recency dates update (avoids race with series updates)
+        dataManager.$latestHRVDate
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
+                    self.recoveryScore = self.computeRecoveryScore()
+                    self.updateCoachingMessage()
+                }
+            }
+            .store(in: &cancellables)
+
+        dataManager.$latestRHRDate
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.didTakeMorningSnapshot, self.recoveryScore == 0, self.dataManager.canComputeRecoveryScore {
+                    self.recoveryScore = self.computeRecoveryScore()
+                    self.updateCoachingMessage()
+                }
             }
             .store(in: &cancellables)
         
@@ -108,8 +144,34 @@ final class HomeViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] v in
                 self?.todaySleepHours = v
-                // Sleep score should be fixed after morning snapshot; don't recompute automatically
+                self?.attemptMorningSnapshotIfNeeded()
+                // If snapshot already taken and sleep arrives later, update sleep score only
+                if let self = self, self.didTakeMorningSnapshot, self.sleepScore == 0, v > 0 {
+                    self.sleepScore = self.computeSleepScore()
+                    self.updateCoachingMessage()
+                }
             }
+            .store(in: &cancellables)
+
+        // Nutrition metrics
+        dataManager.$todayDietaryEnergy
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayDietaryEnergy, on: self)
+            .store(in: &cancellables)
+
+        dataManager.$todayProteinGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayProteinGrams, on: self)
+            .store(in: &cancellables)
+
+        dataManager.$todayCarbsGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayCarbsGrams, on: self)
+            .store(in: &cancellables)
+
+        dataManager.$todayFatGrams
+            .receive(on: RunLoop.main)
+            .assign(to: \.todayFatGrams, on: self)
             .store(in: &cancellables)
         
         // Subscribe to authorization state
@@ -119,6 +181,7 @@ final class HomeViewModel: ObservableObject {
                 print("🔗 Permission status updated: \(hasPermission)")
                 self?.hasHealthKitPermission = hasPermission
                 self?.updateCoachingMessage()
+                // If permission just granted, snapshot will occur once data arrives
             }
             .store(in: &cancellables)
             
@@ -145,6 +208,17 @@ final class HomeViewModel: ObservableObject {
         strainScore = computeStrainScore()
         updateCoachingMessage()
         print("🧮 Morning snapshot set - Recovery: \(recoveryScore), Sleep: \(sleepScore), Strain: \(strainScore)")
+    }
+
+    // Compute once when data is available
+    private var didTakeMorningSnapshot: Bool = false
+    private func attemptMorningSnapshotIfNeeded() {
+        guard !didTakeMorningSnapshot else { return }
+        let haveCore = ((latestHRV ?? 0) > 0 && (latestRHR ?? 0) > 0) || todaySleepHours > 0
+        if haveCore {
+            recomputeScoresMorningSnapshot()
+            didTakeMorningSnapshot = true
+        }
     }
     
     private func computeRecoveryScore() -> Int {

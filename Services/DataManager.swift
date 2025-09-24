@@ -233,13 +233,11 @@ final class DataManager: ObservableObject {
         print("🔄 DataManager.refreshAll() called")
         Task {
             do {
-                let success = try await hk.requestAuthorization()
+                // Use consolidated flow that also loads today's metrics and activity
+                let success = await hk.requestAuthorizationIfNeeded()
                 if success {
                     print("🔄 Authorization successful - loading data")
-                    // load initial 30-day biology data
-                    await hk.loadBiology30Days()
-                    // start observation for incremental updates
-                    hk.startObservers()
+                    // requestAuthorizationIfNeeded already loads today, biology, activity, workouts, and starts observers
                 } else {
                     print("🔄 Authorization failed")
                 }

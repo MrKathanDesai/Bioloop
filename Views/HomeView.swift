@@ -4,8 +4,6 @@ import HealthKit
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel.shared
     @State private var selectedDate = Date()
-    @State private var snapshotScore: HealthScore? = nil
-    @State private var isLoadingSnapshot = false
     
     var body: some View {
         NavigationView {
@@ -38,9 +36,9 @@ struct HomeView: View {
                             VStack(spacing: 20) {
                                 // Core rings section - Quick Glance at Recovery, Strain, Sleep
                                 CoreRingsSection(
-                                    recoveryScore: snapshotScore?.recovery.value ?? Double(viewModel.recoveryScore),
-                                    sleepScore: snapshotScore?.sleep.value ?? Double(viewModel.sleepScore),
-                                    strainScore: snapshotScore?.strain.value ?? Double(viewModel.strainScore),
+                                    recoveryScore: Double(viewModel.recoveryScore),
+                                    sleepScore: Double(viewModel.sleepScore),
+                                    strainScore: Double(viewModel.strainScore),
                                     coachingMessage: CoachingMessage(
                                         message: viewModel.coachingMessage,
                                         type: .general,
@@ -66,7 +64,7 @@ struct HomeView: View {
                                         // Intake Donut
                                         HStack(spacing: 12) {
                                             let totalTargetKcal: Double = 2200
-                                            let consumed = DataManager.shared.todayDietaryEnergy
+                                            let consumed = viewModel.todayDietaryEnergy
                                             let pct = max(0, min(consumed / totalTargetKcal, 1)) * 100
                                             CircularProgressRing(
                                                 value: pct,
@@ -91,9 +89,9 @@ struct HomeView: View {
 
                                         // Macros Level Bars
                                         VStack(alignment: .leading, spacing: 10) {
-                                            MacroLevelRow(title: "Protein", value: DataManager.shared.todayProteinGrams, target: 120, color: .green)
-                                            MacroLevelRow(title: "Carbs", value: DataManager.shared.todayCarbsGrams, target: 250, color: .blue)
-                                            MacroLevelRow(title: "Fats", value: DataManager.shared.todayFatGrams, target: 70, color: .orange)
+                                            MacroLevelRow(title: "Protein", value: viewModel.todayProteinGrams, target: 120, color: .green)
+                                            MacroLevelRow(title: "Carbs", value: viewModel.todayCarbsGrams, target: 250, color: .blue)
+                                            MacroLevelRow(title: "Fats", value: viewModel.todayFatGrams, target: 70, color: .orange)
                                         }
                                         .frame(maxWidth: .infinity, minHeight: 120)
                                         .padding(12)
@@ -274,21 +272,15 @@ struct HomeView: View {
 
                 // Load data asynchronously without blocking UI
                 viewModel.refreshAll()
-            }
-            .onChange(of: selectedDate) { _, newDate in
-                let cal = Calendar.current
-                if cal.isDateInToday(newDate) {
-                    snapshotScore = nil
-                    return
-                }
-                isLoadingSnapshot = true
                 Task {
-                    let s = await DataManager.shared.scores(on: newDate)
-                    await MainActor.run {
-                        self.snapshotScore = s
-                        self.isLoadingSnapshot = false
+                    if HealthKitManager.shared.hasPermission {
+                        await HealthKitManager.shared.loadTodayData()
                     }
                 }
+            }
+            .onChange(of: selectedDate) { oldDate, newDate in
+                // For now, keep today-only behavior. Optionally refresh data on date change.
+                viewModel.refreshAll()
             }
         }
     }
