@@ -741,35 +741,37 @@ struct HealthScoreCard: View {
             if hasRecentData && overallScore > 0 {
                 // Score display
                 VStack(alignment: .leading, spacing: BiologySpacing.textSpacing) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(scoreGrade)
-                            .font(.system(size: 32, weight: .bold))
+                            .font(.system(size: 28, weight: .semibold))
                             .foregroundColor(scoreColor)
-                        
+
                         Text(String(format: "%.0f", overallScore))
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundColor(BiologyColors.subtext)
-                            .baselineOffset(8)
+                            .baselineOffset(6)
                     }
                     
                     Text(fitnessLevel)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(scoreColor)
                 }
                 
                 // Progress ring
                 ZStack {
+                    // Background ring
                     Circle()
-                        .stroke(BiologyColors.grid, lineWidth: 4)
-                        .frame(width: 68, height: 68)
-                    
+                        .stroke(BiologyColors.grid, lineWidth: 6)
+                        .frame(width: 92, height: 92)
+
+                    // Progress ring (same frame/width so it overlays cleanly)
                     Circle()
                         .trim(from: 0, to: overallScore / 100)
                         .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .frame(width: 80, height: 80)
+                        .frame(width: 92, height: 92)
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 1), value: overallScore)
-                    
+
                     Text(String(format: "%.0f", overallScore))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(scoreColor)
