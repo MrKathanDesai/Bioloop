@@ -33,7 +33,7 @@ struct HRVCard: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: BiologySpacing.metricChartSpacing) {
+        VStack(alignment: .leading, spacing: BiologySpacing.textSpacing) {
             // Header
             HStack {
                 Image(systemName: "waveform.path.ecg")
@@ -449,7 +449,7 @@ struct BodyCompositionCard: View {
             }
             
             if let comp = composition {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .center, spacing: 12) {
                     // Pie chart - using actual percentage values (left)
                     Chart {
                         SectorMark(
@@ -484,10 +484,10 @@ struct BodyCompositionCard: View {
                         .foregroundStyle(BiologyColors.violet)
                         .opacity(0.8)
                     }
-                    .frame(width: 140, height: 140)
+                    .frame(width: 132, height: 132)
 
                     // Metrics (right)
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Circle()
                                 .fill(BiologyColors.primary)
@@ -524,7 +524,6 @@ struct BodyCompositionCard: View {
                         Text(String(format: "Total: %.1f%%", total))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(BiologyColors.subtext)
-                            .padding(.top, 4)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -739,9 +738,9 @@ struct HealthScoreCard: View {
             }
             
             if hasRecentData && overallScore > 0 {
-                HStack(alignment: .center, spacing: 16) {
+                HStack(alignment: .center, spacing: 12) {
                     // Score text (left)
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(scoreGrade)
                                 .font(.system(size: 30, weight: .semibold))
@@ -760,11 +759,11 @@ struct HealthScoreCard: View {
                     ZStack {
                         Circle()
                             .stroke(BiologyColors.grid, lineWidth: 6)
-                            .frame(width: 92, height: 92)
+                            .frame(width: 88, height: 88)
                         Circle()
                             .trim(from: 0, to: overallScore / 100)
                             .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                            .frame(width: 92, height: 92)
+                            .frame(width: 88, height: 88)
                             .rotationEffect(.degrees(-90))
                             .animation(.easeOut(duration: 1), value: overallScore)
                         Text(String(format: "%.0f", overallScore))
