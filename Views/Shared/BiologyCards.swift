@@ -482,7 +482,7 @@ struct BodyCompositionCard: View {
                     .foregroundStyle(BiologyColors.violet)
                     .opacity(0.8)
                 }
-                .frame(height: 100)
+                .frame(height: 120)
                 
                 // Legend - showing all 4 components with total verification
                 VStack(spacing: 4) {
@@ -542,6 +542,7 @@ struct BodyCompositionCard: View {
             }
         }
         .biologyCard()
+        .frame(minHeight: 200)
     }
 }
 
@@ -772,6 +773,7 @@ struct HealthScoreCard: View {
                         .foregroundColor(scoreColor)
                 }
                 .frame(height: 80)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Not Enough Data Yet")
@@ -787,6 +789,7 @@ struct HealthScoreCard: View {
             }
         }
         .biologyCard()
+        .frame(minHeight: 200)
     }
 }
 
