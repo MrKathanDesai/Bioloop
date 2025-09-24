@@ -376,12 +376,18 @@ struct BodyCompositionCard: View {
     let bodyFat: Double?
     let hasData: Bool
     
+    // Derive lean body mass from weight and body fat when possible
+    private var computedLeanBodyMass: Double? {
+        guard let weight = weight, let bodyFat = bodyFat, weight > 0, bodyFat > 0 else { return nil }
+        return weight * (1.0 - bodyFat / 100.0)
+    }
+    
     // Calculate body composition from available data
     private var composition: BodyCompositionData? {
         guard hasData, let weight = weight, weight > 0 else { return nil }
         
-        // If we have lean body mass from HealthKit
-        if let leanMass = leanBodyMass, leanMass > 0 {
+        // If we have lean body mass (from HealthKit or derived from body fat)
+        if let leanMass = (leanBodyMass ?? computedLeanBodyMass), leanMass > 0 {
             let fatMass = weight - leanMass
             let fatPercentage = (fatMass / weight) * 100
             
@@ -585,7 +591,8 @@ struct HealthScoreCard: View {
         
         // If we don't have all components, adjust weights proportionally
         if totalWeight > 0 {
-            totalScore = weightedSum / totalWeight * 100
+            // weighted average already in 0-100 scale
+            totalScore = weightedSum / totalWeight
         }
         
         return min(max(totalScore, 0), 100)

@@ -1,20 +1,28 @@
 import SwiftUI
 import Charts
 
-// MARK: - Design Tokens & Colors
+// MARK: - Design Tokens & Colors (adaptive)
 struct BiologyColors {
-    static let bg = Color(hex: "#F6F7FB")
-    static let cardBorder = Color(hex: "#E9EDF3")
-    static let shadow = Color(hex: "#0B1A2A").opacity(0.06)
-    static let text = Color(hex: "#111316")
-    static let subtext = Color(hex: "#6C6F74")
-    static let muted = Color(hex: "#9CA0A9")
+    // Backgrounds
+    static let bg = Color(.systemGroupedBackground)
+    static let cardBackground = Color(.secondarySystemBackground)
+    static let cardBorder = Color(.separator)
+    static let grid = Color(.tertiarySystemFill)
+
+    // Text
+    static let text = Color(.label)
+    static let subtext = Color(.secondaryLabel)
+    static let muted = Color(.tertiaryLabel)
+
+    // Accents
     static let primary = Color(hex: "#2E7BFF")
     static let violet = Color(hex: "#7A4CFF")
     static let danger = Color(hex: "#E45B2C")
     static let success = Color(hex: "#10B981")
     static let warning = Color(hex: "#F59E0B")
-    static let grid = Color(hex: "#E9EBF0")
+
+    // Shadow
+    static let shadow = Color.black.opacity(0.12)
 }
 
 // MARK: - Spacing Constants
@@ -64,7 +72,7 @@ extension View {
             .padding(.horizontal, BiologySpacing.cardInternalPadding)
             .background(
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.white)
+                    .fill(BiologyColors.cardBackground)
                     .shadow(color: BiologyColors.shadow, radius: 36, x: 0, y: 8)
             )
             .overlay(
@@ -244,9 +252,9 @@ struct BiologyView: View {
                 // Body composition pie chart
                 BodyCompositionCard(
                     weight: dataManager.latestWeight,
-                    leanBodyMass: healthData.leanBodyMass,
-                    bodyFat: healthData.bodyFat,
-                    hasData: dataManager.hasDisplayableWeight || (healthData.leanBodyMass != nil) || (healthData.bodyFat != nil)
+                    leanBodyMass: dataManager.latestLeanBodyMass,
+                    bodyFat: dataManager.latestBodyFatPercentage,
+                    hasData: dataManager.hasDisplayableWeight || (dataManager.latestLeanBodyMass != nil) || (dataManager.latestBodyFatPercentage != nil)
                 )
                             
                 // Health score summary (only with recent data - strict 7-day threshold)
@@ -328,8 +336,8 @@ struct BiologyView: View {
                     workoutMinutes: nil,
                     vo2Max: dataManager.latestVO2Max,
                     weight: dataManager.latestWeight,
-                    leanBodyMass: nil, // Not currently tracked
-                    bodyFat: nil // Not currently tracked
+                    leanBodyMass: dataManager.latestLeanBodyMass,
+                    bodyFat: dataManager.latestBodyFatPercentage
                 )
                 
                 healthData = rawData

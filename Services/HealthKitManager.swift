@@ -68,6 +68,10 @@ final class HealthKitManager: ObservableObject {
     @Published var todayProteinGrams: Double = 0
     @Published var todayCarbsGrams: Double = 0
     @Published var todayFatGrams: Double = 0
+    
+    // Body composition metrics
+    @Published var latestLeanBodyMass: Double? = nil
+    @Published var latestBodyFatPercentage: Double? = nil
 
     // Authorization state
     @Published var hasPermission = false
@@ -99,6 +103,7 @@ final class HealthKitManager: ObservableObject {
             HKQuantityType.quantityType(forIdentifier: .respiratoryRate),
             HKQuantityType.quantityType(forIdentifier: .oxygenSaturation),
             HKQuantityType.quantityType(forIdentifier: .bodyTemperature),
+            HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature),
             HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed),
             HKQuantityType.quantityType(forIdentifier: .dietaryProtein),
             HKQuantityType.quantityType(forIdentifier: .dietaryCarbohydrates),
@@ -160,6 +165,7 @@ final class HealthKitManager: ObservableObject {
                 await loadBiology30Days()
                 await loadActivity30Days()
                 await loadWorkouts30Days()
+                await loadLatestSamples() // Load body composition and other latest samples
                 startObservers()
             }
             
@@ -338,12 +344,24 @@ final class HealthKitManager: ObservableObject {
                 print("🏥 Today's SpO2: \(todaySpO2Percent)%")
             }
 
-            // Body Temperature (°C)
+            // Body Temperature (°C) with wrist temperature fallback
+            var bodyTemp: Double = 0
             if let tempType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature) {
                 let map = try await fetchDailySeries(quantityType: tempType, unit: .degreeCelsius(), startDate: startOfDay, endDate: endOfDay, options: .discreteAverage)
-                todayBodyTemperatureC = map[startOfDay] ?? 0
-                print("🏥 Today's temperature: \(todayBodyTemperatureC) °C")
+                bodyTemp = map[startOfDay] ?? 0
             }
+            if bodyTemp == 0, let wristType = HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature) {
+                // Wrist temperature is delta (°C) per Apple; show baseline+delta only if baseline exists
+                let unit = HKUnit.degreeCelsius()
+                let map = try await fetchDailySeries(quantityType: wristType, unit: unit, startDate: startOfDay, endDate: endOfDay, options: .discreteAverage)
+                let delta = map[startOfDay] ?? 0
+                // We don't have a baseline here; expose delta as relative change around 0 for now
+                // Store as delta in °C so UI can label it accordingly if needed
+                bodyTemp = delta // could be negative/positive
+                print("🏥 Today's wrist temperature delta: \(delta) °C")
+            }
+            todayBodyTemperatureC = bodyTemp
+            print("🏥 Today's temperature: \(todayBodyTemperatureC) °C")
 
             // Dietary Energy Consumed (kcal)
             if let dietType = HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed) {
@@ -672,6 +690,32 @@ final class HealthKitManager: ObservableObject {
                 print("🏥 No Weight data available")
             }
         }
+        
+        // Lean Body Mass - latest sample
+        if let leanBodyMassType = HKQuantityType.quantityType(forIdentifier: .leanBodyMass) {
+            if let latest = try? await fetchLatestSample(leanBodyMassType) as? HKQuantitySample {
+                let leanBodyMassValue = latest.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                await MainActor.run {
+                    self.latestLeanBodyMass = leanBodyMassValue
+                }
+                print("🏥 Latest Lean Body Mass: \(leanBodyMassValue) kg")
+            } else {
+                print("🏥 No Lean Body Mass data available")
+            }
+        }
+        
+        // Body Fat Percentage - latest sample
+        if let bodyFatType = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) {
+            if let latest = try? await fetchLatestSample(bodyFatType) as? HKQuantitySample {
+                let bodyFatValue = latest.quantity.doubleValue(for: .percent()) * 100 // Convert to percentage
+                await MainActor.run {
+                    self.latestBodyFatPercentage = bodyFatValue
+                }
+                print("🏥 Latest Body Fat: \(bodyFatValue)%")
+            } else {
+                print("🏥 No Body Fat data available")
+            }
+        }
     }
     
     // MARK: Apple Health-like biology data loader
@@ -789,6 +833,8 @@ final class HealthKitManager: ObservableObject {
     func startObservers() {
         let sampleTypes: [HKSampleType] = [
             HKQuantityType.quantityType(forIdentifier: .bodyMass)!,
+            HKQuantityType.quantityType(forIdentifier: .leanBodyMass)!,
+            HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage)!,
             HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!,
             HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
             HKQuantityType.quantityType(forIdentifier: .vo2Max)!,
@@ -799,6 +845,7 @@ final class HealthKitManager: ObservableObject {
             HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!,
             HKQuantityType.quantityType(forIdentifier: .oxygenSaturation)!,
             HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!,
+            HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature)!,
             HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed)!,
             HKObjectType.workoutType()
         ]
@@ -847,6 +894,7 @@ final class HealthKitManager: ObservableObject {
                 await self?.loadTodayData()
                 await self?.loadActivity30Days()
                 await self?.loadWorkouts30Days()
+                await self?.loadLatestSamples() // refresh latest body fat/lean as they can be sparse
             }
         }
         anchoredQuery.updateHandler = { [weak self] _, samples, deleted, newAnchor, _ in

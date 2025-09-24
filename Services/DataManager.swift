@@ -29,6 +29,10 @@ final class DataManager: ObservableObject {
     @Published var todayCarbsGrams: Double = 0
     @Published var todayFatGrams: Double = 0
     
+    // Body composition metrics
+    @Published var latestLeanBodyMass: Double? = nil
+    @Published var latestBodyFatPercentage: Double? = nil
+    
     // Authorization state
     @Published var hasHealthKitPermission: Bool = false
     @Published var isLoading: Bool = false
@@ -190,6 +194,17 @@ final class DataManager: ObservableObject {
         hk.$todayFatGrams
             .receive(on: RunLoop.main)
             .assign(to: \.todayFatGrams, on: self)
+            .store(in: &cancellables)
+        
+        // Bind body composition metrics
+        hk.$latestLeanBodyMass
+            .receive(on: RunLoop.main)
+            .assign(to: \.latestLeanBodyMass, on: self)
+            .store(in: &cancellables)
+            
+        hk.$latestBodyFatPercentage
+            .receive(on: RunLoop.main)
+            .assign(to: \.latestBodyFatPercentage, on: self)
             .store(in: &cancellables)
         
         // Bind authorization state

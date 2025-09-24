@@ -52,6 +52,12 @@ struct FitnessView: View {
 
 private struct StepsCard: View {
     let steps: [HealthMetricPoint]
+    private let calendar = Calendar.current
+    private let dayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.setLocalizedDateFormatFromTemplate("d") // day of month
+        return df
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -68,19 +74,31 @@ private struct StepsCard: View {
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             } else {
+                let today = calendar.startOfDay(for: Date())
                 Chart(steps) { point in
                     BarMark(
                         x: .value("Date", point.date),
                         y: .value("Steps", point.value)
                     )
                     .foregroundStyle(point.isActualData ? .blue.opacity(0.8) : .blue.opacity(0.3))
+
+                    // Optional highlight for today
+                    if calendar.isDate(point.date, inSameDayAs: today) {
+                        RuleMark(x: .value("Today", point.date))
+                            .foregroundStyle(.red.opacity(0.5))
+                    }
                 }
                 .frame(height: 180)
                 .chartYAxis {
                     AxisMarks(position: .leading)
                 }
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .day, count: 5))
+                    AxisMarks(values: .stride(by: .day, count: 3)) { value in
+                        if let date = value.as(Date.self) {
+                            AxisGridLine()
+                            AxisValueLabel(dayFormatter.string(from: date))
+                        }
+                    }
                 }
 
                 if let last = steps.last {
@@ -209,6 +227,12 @@ private func workoutName(_ type: HKWorkoutActivityType) -> String {
 
 private struct ActiveEnergyCard: View {
     let energy: [HealthMetricPoint]
+    private let calendar = Calendar.current
+    private let dayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.setLocalizedDateFormatFromTemplate("d")
+        return df
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -225,6 +249,7 @@ private struct ActiveEnergyCard: View {
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             } else {
+                let today = calendar.startOfDay(for: Date())
                 Chart(energy) { point in
                     LineMark(
                         x: .value("Date", point.date),
@@ -240,13 +265,23 @@ private struct ActiveEnergyCard: View {
                     )
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(.orange.opacity(0.1))
+
+                    if calendar.isDate(point.date, inSameDayAs: today) {
+                        RuleMark(x: .value("Today", point.date))
+                            .foregroundStyle(.red.opacity(0.5))
+                    }
                 }
                 .frame(height: 180)
                 .chartYAxis {
                     AxisMarks(position: .leading)
                 }
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .day, count: 5))
+                    AxisMarks(values: .stride(by: .day, count: 3)) { value in
+                        if let date = value.as(Date.self) {
+                            AxisGridLine()
+                            AxisValueLabel(dayFormatter.string(from: date))
+                        }
+                    }
                 }
 
                 if let last = energy.last {
