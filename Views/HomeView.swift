@@ -60,7 +60,7 @@ struct HomeView: View {
                                     .padding(.horizontal)
 
                                     // Single row: Intake donut left, macros level right
-                                    HStack(spacing: 16) {
+                                    HStack(alignment: .top, spacing: 16) {
                                         // Intake Donut
                                         HStack(spacing: 12) {
                                             let totalTargetKcal: Double = 2200
@@ -82,6 +82,7 @@ struct HomeView: View {
                                                     .foregroundColor(.secondary)
                                             }
                                         }
+                                        .frame(minHeight: 120)
                                         .padding(12)
                                         .background(Color(.systemGray6))
                                         .cornerRadius(12)
@@ -92,7 +93,7 @@ struct HomeView: View {
                                             MacroLevelRow(title: "Carbs", value: DataManager.shared.todayCarbsGrams, target: 250, color: .blue)
                                             MacroLevelRow(title: "Fats", value: DataManager.shared.todayFatGrams, target: 70, color: .orange)
                                         }
-                                        .frame(maxWidth: .infinity)
+                                        .frame(maxWidth: .infinity, minHeight: 120)
                                         .padding(12)
                                         .background(Color(.systemGray6))
                                         .cornerRadius(12)

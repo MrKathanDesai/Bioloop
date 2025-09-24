@@ -80,18 +80,17 @@ struct BiologyView: View {
     @State private var isLoading = true
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var cardAppearStates: [Bool] = Array(repeating: false, count: 6)
     
     // Real trend data from HealthKit - now reactive via DataManager (declared above)
     @State private var bodyComposition: BodyCompositionData?
     @State private var userProfile: UserProfile?
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     var body: some View {
         ScrollView {
             VStack(spacing: BiologySpacing.contentSpacing) {
                 // Header Section
                 headerSection
+                    .padding(.top, 50)
                 
                 if isLoading {
                     loadingSection
@@ -104,20 +103,10 @@ struct BiologyView: View {
             .padding(.horizontal, BiologySpacing.horizontalPadding)
         }
         .background(BiologyColors.bg)
-        .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            FloatingTabBar(selected: .constant(3))
-        }
+        .ignoresSafeArea(.all, edges: .top)
         .onAppear {
             loadHealthData()
             setupHistoricalDataObserver()
-            
-            if !reduceMotion {
-                startStaggeredAnimation()
-            } else {
-                cardAppearStates = Array(repeating: true, count: 6)
-            }
         }
         .alert("Error", isPresented: $showError) {
             Button("OK") { }
@@ -226,7 +215,6 @@ struct BiologyView: View {
                 userAge: 30, // Default age - could be enhanced to calculate from birth date
                 hasData: dataManager.hasDisplayableVO2Max
             )
-                            .offset(y: cardAppearStates[0] ? 0 : 12)
                         
                         HStack(spacing: BiologySpacing.sideBySideSpacing) {
                 // HRV with baseline comparison
@@ -235,7 +223,6 @@ struct BiologyView: View {
                     history: dataManager.hrvSeries,
                     hasData: dataManager.hasDisplayableHRV
                 )
-                                .offset(y: cardAppearStates[1] ? 0 : 12)
                             
                 // Resting Heart Rate with zones
                 RestingHeartRateCard(
@@ -243,7 +230,6 @@ struct BiologyView: View {
                     history: dataManager.rhrSeries,
                     hasData: dataManager.hasDisplayableRHR
                 )
-                                .offset(y: cardAppearStates[2] ? 0 : 12)
                         }
                         
             // Weight tracking with BMI context
@@ -253,34 +239,38 @@ struct BiologyView: View {
                 height: 175, // Default height in cm - could be enhanced to fetch from HealthKit
                 hasData: dataManager.hasDisplayableWeight
             )
-                            .offset(y: cardAppearStates[3] ? 0 : 12)
                         
                         HStack(spacing: BiologySpacing.sideBySideSpacing) {
                 // Body composition pie chart
                 BodyCompositionCard(
-                    composition: bodyComposition ?? BodyCompositionData(
-                        muscle: healthData.leanBodyMass ?? 0,
-                        fat: healthData.bodyFat ?? 0,
-                        bone: 12.0,
-                        water: 60.0
-                    )
+                    weight: dataManager.latestWeight,
+                    leanBodyMass: healthData.leanBodyMass,
+                    bodyFat: healthData.bodyFat,
+                    hasData: dataManager.hasDisplayableWeight || (healthData.leanBodyMass != nil) || (healthData.bodyFat != nil)
                 )
-                                .offset(y: cardAppearStates[4] ? 0 : 12)
                             
                 // Health score summary (only with recent data - strict 7-day threshold)
                 HealthScoreCard(
                     vo2Max: dataManager.hasRecentVO2Max ? (dataManager.latestVO2Max ?? 0) : 0,
                     hrv: dataManager.hasRecentHRV ? (dataManager.latestHRV ?? 0) : 0,
-                    rhr: dataManager.hasRecentRHR ? (dataManager.latestRHR ?? 0) : 0
+                    rhr: dataManager.hasRecentRHR ? (dataManager.latestRHR ?? 0) : 0,
+                    weight: dataManager.latestWeight,
+                    age: calculateAge(), // Calculate age from user profile or use default
+                    hasRecentData: dataManager.canComputeRecoveryScore || (dataManager.hasRecentVO2Max && (dataManager.hasRecentHRV || dataManager.hasRecentRHR))
                 )
-                                .offset(y: cardAppearStates[5] ? 0 : 12)
                         }
                     }
                     .padding(.horizontal, BiologySpacing.horizontalPadding)
                     .padding(.bottom, BiologySpacing.bottomSafeArea)
-                    .opacity(cardAppearStates.allSatisfy { $0 } ? 1 : 0.3)
-                    .animation(.easeOut(duration: 0.8), value: cardAppearStates.allSatisfy { $0 })
                 }
+    
+    // MARK: - Helper Functions
+    
+    private func calculateAge() -> Int {
+        // In a real app, this would fetch the user's birth date from HealthKit or user profile
+        // For now, return a reasonable default age for health calculations
+        return 30
+    }
     
     // MARK: - Data Loading
     
@@ -290,15 +280,6 @@ struct BiologyView: View {
         print("🏥 Historical data observer setup - using @Published properties from DataManager")
     }
     
-    private func startStaggeredAnimation() {
-        for i in 0..<6 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.2) {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    cardAppearStates[i] = true
-                }
-            }
-        }
-    }
     
     private func requestHealthKitPermissions() {
         Task {

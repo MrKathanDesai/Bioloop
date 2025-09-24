@@ -142,63 +142,191 @@ final class HomeViewModel: ObservableObject {
     }
     
     private func computeRecoveryScore() -> Int {
-        guard let hrv = latestHRV, let rhr = latestRHR else {
+        // Recovery score should only be calculated if we have recent, valid data
+        guard let hrv = latestHRV, 
+              let rhr = latestRHR,
+              dataManager.hasRecentHRV,
+              dataManager.hasRecentRHR,
+              hrv > 0,
+              rhr > 0 else {
+            print("🧮 Recovery: No recent HRV/RHR data available")
             return 0
         }
         
-        // Simple scoring algorithm
-        // HRV: Higher is better (typical range 20-60ms)
-        // RHR: Lower is better (typical range 50-100 bpm)
+        // Enhanced recovery algorithm with more realistic scoring
+        var recoveryScore = 50.0 // Base score
         
-        let hrvScore = min(100, max(0, (hrv - 20) / 40 * 100)) // 20-60ms -> 0-100
-        let rhrScore = min(100, max(0, (100 - rhr) / 50 * 100)) // 50-100 bpm -> 100-0
+        // HRV Component (50% weight)
+        // Typical healthy ranges: 20-50ms (varies by age/fitness)
+        let hrvScore: Double
+        if hrv >= 40 {
+            hrvScore = 85 + min(15, (hrv - 40) * 0.5) // Excellent: 85-100
+        } else if hrv >= 30 {
+            hrvScore = 70 + ((hrv - 30) / 10) * 15 // Good: 70-85
+        } else if hrv >= 20 {
+            hrvScore = 50 + ((hrv - 20) / 10) * 20 // Fair: 50-70
+        } else {
+            hrvScore = max(10, hrv * 2.5) // Poor: 10-50
+        }
         
-        let combinedScore = (hrvScore + rhrScore) / 2
-        return Int(combinedScore)
+        // RHR Component (50% weight)
+        // Typical ranges: 50-100 bpm (lower is generally better)
+        let rhrScore: Double
+        if rhr <= 55 {
+            rhrScore = 90 + min(10, (55 - rhr) * 0.5) // Excellent: 90-100
+        } else if rhr <= 65 {
+            rhrScore = 75 + ((65 - rhr) / 10) * 15 // Good: 75-90
+        } else if rhr <= 80 {
+            rhrScore = 50 + ((80 - rhr) / 15) * 25 // Fair: 50-75
+        } else {
+            rhrScore = max(10, (120 - rhr) * 0.8) // Poor: 10-50
+        }
+        
+        // Combine scores
+        recoveryScore = (hrvScore + rhrScore) / 2
+        
+        // Factor in sleep quality if available
+        if todaySleepHours > 0 {
+            let sleepMultiplier: Double
+            if todaySleepHours >= 7 && todaySleepHours <= 9 {
+                sleepMultiplier = 1.1 // Boost for optimal sleep
+            } else if todaySleepHours >= 6 && todaySleepHours <= 10 {
+                sleepMultiplier = 1.0 // Neutral for decent sleep
+            } else {
+                sleepMultiplier = 0.85 // Penalty for poor sleep
+            }
+            recoveryScore *= sleepMultiplier
+        }
+        
+        // Clamp between 0-100
+        let finalScore = max(0, min(100, recoveryScore))
+        
+        print("🧮 Recovery calculation: HRV=\(hrv)ms (score: \(Int(hrvScore))), RHR=\(rhr)bpm (score: \(Int(rhrScore))), Sleep=\(todaySleepHours)h, Final=\(Int(finalScore))")
+        
+        return Int(finalScore)
     }
     
     private func computeSleepScore() -> Int {
-        guard todaySleepHours > 0 else { return 0 }
-        
-        // Optimal sleep is 7-9 hours
-        if todaySleepHours >= 7 && todaySleepHours <= 9 {
-            return 100
-        } else if todaySleepHours >= 6 && todaySleepHours < 7 {
-            return 80
-        } else if todaySleepHours > 9 && todaySleepHours <= 10 {
-            return 80
-        } else if todaySleepHours >= 5 && todaySleepHours < 6 {
-            return 60
-        } else if todaySleepHours > 10 {
-            return 60
-        } else {
-            return 40
+        guard todaySleepHours > 0 else { 
+            print("🧮 Sleep: No sleep data available")
+            return 0 
         }
+        
+        // More nuanced sleep scoring based on sleep research
+        let score: Double
+        
+        if todaySleepHours >= 7.5 && todaySleepHours <= 8.5 {
+            score = 95 + min(5, (8.5 - abs(todaySleepHours - 8)) * 2) // Optimal: 95-100
+        } else if todaySleepHours >= 7 && todaySleepHours <= 9 {
+            score = 85 + ((9 - abs(todaySleepHours - 8)) / 1) * 10 // Very Good: 85-95
+        } else if todaySleepHours >= 6.5 && todaySleepHours <= 9.5 {
+            score = 70 + ((9.5 - abs(todaySleepHours - 8)) / 1.5) * 15 // Good: 70-85
+        } else if todaySleepHours >= 6 && todaySleepHours <= 10 {
+            score = 50 + ((10 - abs(todaySleepHours - 8)) / 2) * 20 // Fair: 50-70
+        } else if todaySleepHours >= 5 && todaySleepHours <= 11 {
+            score = 30 + ((11 - abs(todaySleepHours - 8)) / 3) * 20 // Poor: 30-50
+        } else {
+            score = max(10, 30 - abs(todaySleepHours - 8) * 2) // Very Poor: 10-30
+        }
+        
+        let finalScore = max(0, min(100, score))
+        print("🧮 Sleep calculation: \(todaySleepHours)h -> \(Int(finalScore))")
+        
+        return Int(finalScore)
     }
     
     private func computeStrainScore() -> Int {
-        // Based on steps and active energy
-        let stepScore = min(100, max(0, todaySteps / 10000 * 100)) // 10k steps = 100%
-        let energyScore = min(100, max(0, todayActiveEnergy / 500 * 100)) // 500 cal = 100%
+        // Strain should reflect actual physical activity, not just steps
+        guard todaySteps > 0 || todayActiveEnergy > 0 else {
+            print("🧮 Strain: No activity data available")
+            return 0
+        }
         
-        return Int((stepScore + energyScore) / 2)
+        // More sophisticated strain calculation
+        var strainScore = 0.0
+        
+        // Steps component (40% weight) - with diminishing returns
+        let stepScore: Double
+        if todaySteps >= 12000 {
+            stepScore = 90 + min(10, (todaySteps - 12000) / 3000 * 10) // High activity: 90-100
+        } else if todaySteps >= 8000 {
+            stepScore = 70 + ((todaySteps - 8000) / 4000) * 20 // Moderate: 70-90
+        } else if todaySteps >= 5000 {
+            stepScore = 40 + ((todaySteps - 5000) / 3000) * 30 // Low-Moderate: 40-70
+        } else if todaySteps >= 2000 {
+            stepScore = 20 + ((todaySteps - 2000) / 3000) * 20 // Low: 20-40
+        } else {
+            stepScore = max(5, todaySteps / 2000 * 20) // Very Low: 5-20
+        }
+        
+        // Active energy component (60% weight) - more important for strain
+        let energyScore: Double
+        if todayActiveEnergy >= 600 {
+            energyScore = 85 + min(15, (todayActiveEnergy - 600) / 200 * 15) // High: 85-100
+        } else if todayActiveEnergy >= 400 {
+            energyScore = 65 + ((todayActiveEnergy - 400) / 200) * 20 // Moderate: 65-85
+        } else if todayActiveEnergy >= 200 {
+            energyScore = 35 + ((todayActiveEnergy - 200) / 200) * 30 // Low-Moderate: 35-65
+        } else if todayActiveEnergy >= 100 {
+            energyScore = 15 + ((todayActiveEnergy - 100) / 100) * 20 // Low: 15-35
+        } else {
+            energyScore = max(5, todayActiveEnergy / 100 * 15) // Very Low: 5-15
+        }
+        
+        // Weighted combination
+        strainScore = (stepScore * 0.4) + (energyScore * 0.6)
+        
+        let finalScore = max(0, min(100, strainScore))
+        print("🧮 Strain calculation: Steps=\(Int(todaySteps)) (score: \(Int(stepScore))), Energy=\(Int(todayActiveEnergy))cal (score: \(Int(energyScore))), Final=\(Int(finalScore))")
+        
+        return Int(finalScore)
     }
     
     private func updateCoachingMessage() {
         if !hasHealthKitPermission {
             coachingMessage = "Connect your health data to see personalized insights!"
-        } else if !dataManager.hasBiologyData {
-            coachingMessage = "Great! Your basic metrics are connected. Keep wearing your Apple Watch to see advanced insights."
+        } else if recoveryScore == 0 && sleepScore == 0 && strainScore == 0 {
+            coachingMessage = "Keep wearing your Apple Watch to collect health metrics for personalized insights."
         } else {
-            // Generate personalized coaching based on scores
-            if recoveryScore >= 80 {
-                coachingMessage = "Excellent recovery! Your body is well-rested and ready for activity."
-            } else if recoveryScore >= 60 {
-                coachingMessage = "Good recovery. Consider light activity or rest based on how you feel."
-            } else if recoveryScore >= 40 {
-                coachingMessage = "Moderate recovery. Focus on rest and light movement today."
+            // Generate coaching based on available scores
+            var messages: [String] = []
+            
+            // Recovery-based coaching
+            if recoveryScore > 0 {
+                if recoveryScore >= 85 {
+                    messages.append("Excellent recovery! Your body is primed for high-intensity activities.")
+                } else if recoveryScore >= 70 {
+                    messages.append("Good recovery. You're ready for moderate to high activity.")
+                } else if recoveryScore >= 50 {
+                    messages.append("Fair recovery. Consider light to moderate activity today.")
+                } else {
+                    messages.append("Low recovery detected. Focus on rest and stress management.")
+                }
+            }
+            
+            // Sleep-based coaching
+            if sleepScore > 0 {
+                if sleepScore >= 85 {
+                    messages.append("Great sleep quality!")
+                } else if sleepScore < 50 {
+                    messages.append("Consider improving your sleep routine for better recovery.")
+                }
+            }
+            
+            // Strain-based coaching
+            if strainScore > 0 {
+                if strainScore < 30 {
+                    messages.append("Low activity detected. Try to increase your daily movement.")
+                } else if strainScore >= 80 {
+                    messages.append("High activity level - great job staying active!")
+                }
+            }
+            
+            // Combine messages or use default
+            if messages.isEmpty {
+                coachingMessage = "Gathering your health data... Wear your Apple Watch for better insights."
             } else {
-                coachingMessage = "Low recovery detected. Prioritize rest and gentle activities."
+                coachingMessage = messages.joined(separator: " ")
             }
         }
     }
