@@ -441,7 +441,8 @@ struct BodyCompositionCard: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(BiologyColors.text)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(1)
                     .allowsTightening(true)
                 
                 Spacer()
@@ -727,10 +728,11 @@ struct HealthScoreCard: View {
                     .foregroundColor(hasRecentData ? scoreColor : BiologyColors.muted)
                 
                 Text("Health Score")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(BiologyColors.text)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.6)
+                    .layoutPriority(1)
                     .allowsTightening(true)
                 
                 Spacer()
@@ -763,17 +765,17 @@ struct HealthScoreCard: View {
                     
                     Circle()
                         .trim(from: 0, to: overallScore / 100)
-                        .stroke(scoreColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 68, height: 68)
+                        .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                        .frame(width: 80, height: 80)
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 1), value: overallScore)
                     
                     Text(String(format: "%.0f", overallScore))
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundColor(scoreColor)
                 }
-                .frame(height: 80)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 120)
+                .frame(maxWidth: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Not Enough Data Yet")
@@ -789,7 +791,7 @@ struct HealthScoreCard: View {
             }
         }
         .biologyCard()
-        .frame(minHeight: 200)
+        .frame(height: 220)
     }
 }
 
