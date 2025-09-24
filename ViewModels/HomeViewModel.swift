@@ -149,8 +149,7 @@ final class HomeViewModel: ObservableObject {
                     self.sleepScore = self.computeSleepScore()
                     self.updateCoachingMessage()
                 }
-                // Attempt snapshot (may compute recovery/strain) with tightened criteria
-                self?.attemptMorningSnapshotIfNeeded()
+                // Do not trigger recovery snapshot here
             }
             .store(in: &cancellables)
 
@@ -204,7 +203,10 @@ final class HomeViewModel: ObservableObject {
     private func recomputeScoresMorningSnapshot() {
         print("🧮 Morning snapshot score computation...")
         recoveryScore = computeRecoveryScore()
-        sleepScore = computeSleepScore()
+        // Sleep: compute only if not already set
+        if todaySleepHours > 0 && sleepScore == 0 {
+            sleepScore = computeSleepScore()
+        }
         // Strain will live-update throughout the day from publishers
         strainScore = computeStrainScore()
         updateCoachingMessage()
