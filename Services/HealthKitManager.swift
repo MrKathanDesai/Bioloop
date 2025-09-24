@@ -344,24 +344,38 @@ final class HealthKitManager: ObservableObject {
                 print("🏥 Today's SpO2: \(todaySpO2Percent)%")
             }
 
-            // Body Temperature (°C) with wrist temperature fallback
+            // Body Temperature (°C) with robust fallback logic
             var bodyTemp: Double = 0
             if let tempType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature) {
                 let map = try await fetchDailySeries(quantityType: tempType, unit: .degreeCelsius(), startDate: startOfDay, endDate: endOfDay, options: .discreteAverage)
                 bodyTemp = map[startOfDay] ?? 0
+                if bodyTemp == 0 {
+                    // Fallback to latest sample if no daily aggregate yet
+                    if let latest = try? await fetchLatestSample(tempType) as? HKQuantitySample {
+                        bodyTemp = latest.quantity.doubleValue(for: .degreeCelsius())
+                        print("🏥 Fallback latest body temperature: \(bodyTemp) °C at \(latest.endDate)")
+                    } else {
+                        print("🏥 No body temperature samples available today")
+                    }
+                }
             }
+            // Wrist temperature (delta °C) as secondary fallback
             if bodyTemp == 0, let wristType = HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature) {
-                // Wrist temperature is delta (°C) per Apple; show baseline+delta only if baseline exists
                 let unit = HKUnit.degreeCelsius()
                 let map = try await fetchDailySeries(quantityType: wristType, unit: unit, startDate: startOfDay, endDate: endOfDay, options: .discreteAverage)
-                let delta = map[startOfDay] ?? 0
-                // We don't have a baseline here; expose delta as relative change around 0 for now
-                // Store as delta in °C so UI can label it accordingly if needed
-                bodyTemp = delta // could be negative/positive
-                print("🏥 Today's wrist temperature delta: \(delta) °C")
+                var delta = map[startOfDay] ?? 0
+                if delta == 0 {
+                    if let latest = try? await fetchLatestSample(wristType) as? HKQuantitySample {
+                        delta = latest.quantity.doubleValue(for: unit)
+                        print("🏥 Fallback latest wrist temperature delta: \(delta) °C at \(latest.endDate)")
+                    } else {
+                        print("🏥 No wrist temperature samples available today")
+                    }
+                }
+                bodyTemp = delta // delta may be negative/positive
             }
             todayBodyTemperatureC = bodyTemp
-            print("🏥 Today's temperature: \(todayBodyTemperatureC) °C")
+            print("🏥 Today's temperature metric (°C, absolute or delta): \(todayBodyTemperatureC)")
 
             // Dietary Energy Consumed (kcal)
             if let dietType = HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed) {
