@@ -484,7 +484,8 @@ struct BodyCompositionCard: View {
                         .foregroundStyle(BiologyColors.violet)
                         .opacity(0.8)
                     }
-                    .frame(width: 132, height: 132)
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
 
                     // Metrics (right)
                     VStack(alignment: .leading, spacing: 6) {
@@ -526,6 +527,7 @@ struct BodyCompositionCard: View {
                             .foregroundColor(BiologyColors.subtext)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -542,7 +544,6 @@ struct BodyCompositionCard: View {
             }
         }
         .biologyCard()
-        .frame(minHeight: 180)
     }
 }
 
@@ -757,19 +758,24 @@ struct HealthScoreCard: View {
 
                     // Ring (right)
                     ZStack {
-                        Circle()
-                            .stroke(BiologyColors.grid, lineWidth: 6)
-                            .frame(width: 88, height: 88)
-                        Circle()
-                            .trim(from: 0, to: overallScore / 100)
-                            .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                            .frame(width: 88, height: 88)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeOut(duration: 1), value: overallScore)
-                        Text(String(format: "%.0f", overallScore))
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(scoreColor)
+                        GeometryReader { geo in
+                            let size = min(geo.size.width, geo.size.height)
+                            let line: CGFloat = 6
+                            Circle()
+                                .stroke(BiologyColors.grid, lineWidth: line)
+                            Circle()
+                                .trim(from: 0, to: overallScore / 100)
+                                .stroke(scoreColor, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .animation(.easeOut(duration: 1), value: overallScore)
+                            Text(String(format: "%.0f", overallScore))
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(scoreColor)
+                                .frame(width: size, height: size)
+                        }
                     }
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxWidth: 100)
                 }
                 .frame(maxWidth: .infinity)
             } else {
@@ -787,7 +793,6 @@ struct HealthScoreCard: View {
             }
         }
         .biologyCard()
-        .frame(height: 220)
     }
 }
 
