@@ -438,7 +438,7 @@ struct BodyCompositionCard: View {
                     .foregroundColor(hasData ? BiologyColors.primary : BiologyColors.muted)
                 
                 Text("Body Composition")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(BiologyColors.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -449,84 +449,84 @@ struct BodyCompositionCard: View {
             }
             
             if let comp = composition {
-                // Pie chart - using actual percentage values
-                Chart {
-                    SectorMark(
-                        angle: .value("Muscle", comp.muscle),
-                        innerRadius: .ratio(0.4),
-                        angularInset: 1
-                    )
-                    .foregroundStyle(BiologyColors.primary)
-                    .opacity(0.8)
-                    
-                    SectorMark(
-                        angle: .value("Fat", comp.fat),
-                        innerRadius: .ratio(0.4),
-                        angularInset: 1
-                    )
-                    .foregroundStyle(BiologyColors.warning)
-                    .opacity(0.8)
-                    
-                    SectorMark(
-                        angle: .value("Bone", comp.bone),
-                        innerRadius: .ratio(0.4),
-                        angularInset: 1
-                    )
-                    .foregroundStyle(BiologyColors.muted)
-                    .opacity(0.8)
-                    
-                    SectorMark(
-                        angle: .value("Other", comp.water),
-                        innerRadius: .ratio(0.4),
-                        angularInset: 1
-                    )
-                    .foregroundStyle(BiologyColors.violet)
-                    .opacity(0.8)
-                }
-                .frame(height: 120)
-                
-                // Legend - showing all 4 components with total verification
-                VStack(spacing: 4) {
-                    HStack {
-                        Circle()
-                            .fill(BiologyColors.primary)
-                            .frame(width: 8, height: 8)
-                        Text(String(format: "Muscle %.1f%%", comp.muscle))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(BiologyColors.text)
-                        Spacer()
-                        Circle()
-                            .fill(BiologyColors.warning)
-                            .frame(width: 8, height: 8)
-                        Text(String(format: "Fat %.1f%%", comp.fat))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(BiologyColors.text)
+                HStack(alignment: .top, spacing: 16) {
+                    // Pie chart - using actual percentage values (left)
+                    Chart {
+                        SectorMark(
+                            angle: .value("Muscle", comp.muscle),
+                            innerRadius: .ratio(0.4),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(BiologyColors.primary)
+                        .opacity(0.8)
+                        
+                        SectorMark(
+                            angle: .value("Fat", comp.fat),
+                            innerRadius: .ratio(0.4),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(BiologyColors.warning)
+                        .opacity(0.8)
+                        
+                        SectorMark(
+                            angle: .value("Bone", comp.bone),
+                            innerRadius: .ratio(0.4),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(BiologyColors.muted)
+                        .opacity(0.8)
+                        
+                        SectorMark(
+                            angle: .value("Other", comp.water),
+                            innerRadius: .ratio(0.4),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(BiologyColors.violet)
+                        .opacity(0.8)
                     }
-                    
-                    HStack {
-                        Circle()
-                            .fill(BiologyColors.muted)
-                            .frame(width: 8, height: 8)
-                        Text(String(format: "Bone %.1f%%", comp.bone))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(BiologyColors.text)
-                        Spacer()
-                        Circle()
-                            .fill(BiologyColors.violet)
-                            .frame(width: 8, height: 8)
-                        Text(String(format: "Other %.1f%%", comp.water))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(BiologyColors.text)
-                    }
-                    
-                    // Show total to verify it adds to 100%
-                    let total = comp.muscle + comp.fat + comp.bone + comp.water
-                    HStack {
+                    .frame(width: 140, height: 140)
+
+                    // Metrics (right)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Circle()
+                                .fill(BiologyColors.primary)
+                                .frame(width: 8, height: 8)
+                            Text(String(format: "Muscle %.1f%%", comp.muscle))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(BiologyColors.text)
+                        }
+                        HStack {
+                            Circle()
+                                .fill(BiologyColors.warning)
+                                .frame(width: 8, height: 8)
+                            Text(String(format: "Fat %.1f%%", comp.fat))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(BiologyColors.text)
+                        }
+                        HStack {
+                            Circle()
+                                .fill(BiologyColors.muted)
+                                .frame(width: 8, height: 8)
+                            Text(String(format: "Bone %.1f%%", comp.bone))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(BiologyColors.text)
+                        }
+                        HStack {
+                            Circle()
+                                .fill(BiologyColors.violet)
+                                .frame(width: 8, height: 8)
+                            Text(String(format: "Other %.1f%%", comp.water))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(BiologyColors.text)
+                        }
+                        let total = comp.muscle + comp.fat + comp.bone + comp.water
                         Text(String(format: "Total: %.1f%%", total))
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(BiologyColors.subtext)
-                        Spacer()
+                            .padding(.top, 4)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -543,7 +543,7 @@ struct BodyCompositionCard: View {
             }
         }
         .biologyCard()
-        .frame(minHeight: 200)
+        .frame(minHeight: 180)
     }
 }
 
@@ -728,10 +728,10 @@ struct HealthScoreCard: View {
                     .foregroundColor(hasRecentData ? scoreColor : BiologyColors.muted)
                 
                 Text("Health Score")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(BiologyColors.text)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(0.8)
                     .layoutPriority(1)
                     .allowsTightening(true)
                 
@@ -739,44 +739,39 @@ struct HealthScoreCard: View {
             }
             
             if hasRecentData && overallScore > 0 {
-                // Score display
-                VStack(alignment: .leading, spacing: BiologySpacing.textSpacing) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(scoreGrade)
-                            .font(.system(size: 28, weight: .semibold))
+                HStack(alignment: .center, spacing: 16) {
+                    // Score text (left)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(scoreGrade)
+                                .font(.system(size: 30, weight: .semibold))
+                                .foregroundColor(scoreColor)
+                            Text(String(format: "%.0f", overallScore))
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(BiologyColors.subtext)
+                        }
+                        Text(fitnessLevel)
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(scoreColor)
-
-                        Text(String(format: "%.0f", overallScore))
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(BiologyColors.subtext)
-                            .baselineOffset(6)
                     }
-                    
-                    Text(fitnessLevel)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(scoreColor)
-                }
-                
-                // Progress ring
-                ZStack {
-                    // Background ring
-                    Circle()
-                        .stroke(BiologyColors.grid, lineWidth: 6)
-                        .frame(width: 92, height: 92)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Progress ring (same frame/width so it overlays cleanly)
-                    Circle()
-                        .trim(from: 0, to: overallScore / 100)
-                        .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .frame(width: 92, height: 92)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeOut(duration: 1), value: overallScore)
-
-                    Text(String(format: "%.0f", overallScore))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(scoreColor)
+                    // Ring (right)
+                    ZStack {
+                        Circle()
+                            .stroke(BiologyColors.grid, lineWidth: 6)
+                            .frame(width: 92, height: 92)
+                        Circle()
+                            .trim(from: 0, to: overallScore / 100)
+                            .stroke(scoreColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                            .frame(width: 92, height: 92)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.easeOut(duration: 1), value: overallScore)
+                        Text(String(format: "%.0f", overallScore))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(scoreColor)
+                    }
                 }
-                .frame(height: 120)
                 .frame(maxWidth: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
