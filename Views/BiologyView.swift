@@ -248,16 +248,17 @@ struct BiologyView: View {
                 hasData: dataManager.hasDisplayableWeight
             )
                         
-                        HStack(spacing: BiologySpacing.sideBySideSpacing) {
-                // Body composition pie chart
+                        VStack(spacing: BiologySpacing.cardSpacing) {
+                // Body composition pie chart (full width)
                 BodyCompositionCard(
                     weight: dataManager.latestWeight,
                     leanBodyMass: dataManager.latestLeanBodyMass,
                     bodyFat: dataManager.latestBodyFatPercentage,
                     hasData: dataManager.hasDisplayableWeight || (dataManager.latestLeanBodyMass != nil) || (dataManager.latestBodyFatPercentage != nil)
                 )
+                .frame(maxWidth: .infinity)
                             
-                // Health score summary (only with recent data - strict 7-day threshold)
+                // Health score summary (full width)
                 HealthScoreCard(
                     vo2Max: dataManager.hasRecentVO2Max ? (dataManager.latestVO2Max ?? 0) : 0,
                     hrv: dataManager.hasRecentHRV ? (dataManager.latestHRV ?? 0) : 0,
@@ -266,6 +267,7 @@ struct BiologyView: View {
                     age: calculateAge(), // Calculate age from user profile or use default
                     hasRecentData: dataManager.canComputeRecoveryScore || (dataManager.hasRecentVO2Max && (dataManager.hasRecentHRV || dataManager.hasRecentRHR))
                 )
+                .frame(maxWidth: .infinity)
                         }
                     }
                     .padding(.horizontal, BiologySpacing.horizontalPadding)
