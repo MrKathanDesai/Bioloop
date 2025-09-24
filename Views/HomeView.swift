@@ -273,9 +273,10 @@ struct HomeView: View {
                 // Load data asynchronously without blocking UI
                 viewModel.refreshAll()
             }
-            .onChange(of: selectedDate) { oldDate, newDate in
-                // Refresh data when date changes
-                viewModel.refreshAll()
+            .onChange(of: selectedDate) { _, newDate in
+                Task {
+                    await viewModel.loadScores(for: newDate)
+                }
             }
         }
     }

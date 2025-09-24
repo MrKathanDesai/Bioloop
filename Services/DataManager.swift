@@ -249,6 +249,70 @@ final class DataManager: ObservableObject {
         }
     }
     
+    /// Compute scores for a specific date D using historical series and LKV rules
+    func scores(on date: Date) async -> HealthScore {
+        let dayStart = Calendar.current.startOfDay(for: date)
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? date
+
+        // Apple Watch metrics: allow last-known up to D (7-day recency for scoring)
+        let vo2 = latestValue(onOrBefore: dayEnd, from: vo2MaxSeries)
+        let hrv = latestValue(onOrBefore: dayEnd, from: hrvSeries)
+        let rhr = latestValue(onOrBefore: dayEnd, from: rhrSeries)
+
+        // Manual metrics: last known value up to D (display only)
+        let weight = latestValue(onOrBefore: dayEnd, from: weightSeries)
+
+        let healthData = HealthData(
+            date: dayStart,
+            hrv: hrv?.value,
+            restingHeartRate: rhr?.value,
+            heartRate: nil,
+            energyBurned: energyForDay(dayStart),
+            sleepStart: nil,
+            sleepEnd: nil,
+            sleepDuration: sleepHoursForDay(dayStart),
+            sleepEfficiency: nil,
+            deepSleep: nil,
+            remSleep: nil,
+            wakeEvents: nil,
+            workoutMinutes: nil,
+            vo2Max: vo2?.value,
+            weight: weight?.value,
+            leanBodyMass: latestLeanBodyMass,
+            bodyFat: latestBodyFatPercentage
+        )
+
+        let calculator = HealthCalculator.shared
+        return calculator.calculateHealthScores(from: healthData)
+    }
+
+    private func latestValue(onOrBefore date: Date, from series: [HealthMetricPoint]) -> (value: Double, date: Date)? {
+        return series.filter { $0.date <= date }.last.map { ($0.value, $0.date) }
+    }
+
+    private func energyForDay(_ dayStart: Date) -> Double? {
+        if let point = activeEnergySeries.first(where: { Calendar.current.isDate($0.date, inSameDayAs: dayStart) }) {
+            return point.value
+        }
+        return nil
+    }
+
+    private func sleepHoursForDay(_ dayStart: Date) -> Double? {
+        let calendar = Calendar.current
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: dayStart)) else { return nil }
+        // Attempt a direct fetch for that day from HealthKit (category samples)
+        var hours: Double? = nil
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            if let secondsMap = try? await HealthKitManager.shared.fetchSleepDaily(startDate: calendar.startOfDay(for: dayStart), endDate: nextDay) {
+                let sec = secondsMap[calendar.startOfDay(for: dayStart)] ?? 0
+                hours = sec > 0 ? sec / 3600.0 : nil
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return hours
+    }
     /// Request authorization (centralized)
     func requestHealthKitPermissions() async {
         print("🔴 DataManager.requestHealthKitPermissions() called")

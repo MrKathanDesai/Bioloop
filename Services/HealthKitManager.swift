@@ -205,6 +205,23 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+    // MARK: Latest quantity value on or before a given date
+    func latestQuantityValue(onOrBefore date: Date, identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> (value: Double, endDate: Date)? {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
+        return await withCheckedContinuation { cont in
+            let predicate = HKQuery.predicateForSamples(withStart: nil, end: date, options: .strictEndDate)
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let q = HKSampleQuery(sampleType: quantityType, predicate: predicate, limit: 1, sortDescriptors: [sort]) { _, samples, _ in
+                if let s = samples?.first as? HKQuantitySample {
+                    cont.resume(returning: (s.quantity.doubleValue(for: unit), s.endDate))
+                } else {
+                    cont.resume(returning: nil)
+                }
+            }
+            self.healthStore.execute(q)
+        }
+    }
+
     // MARK: Daily series via HKStatisticsCollectionQuery
     /// options example: .cumulativeSum for steps/energy, .discreteAverage for RHR
     func fetchDailySeries(quantityType: HKQuantityType, unit: HKUnit, startDate: Date, endDate: Date, options: HKStatisticsOptions) async throws -> [Date: Double] {

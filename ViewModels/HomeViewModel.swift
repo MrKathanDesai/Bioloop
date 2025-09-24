@@ -348,6 +348,17 @@ final class HomeViewModel: ObservableObject {
         dataManager.refreshAll()
     }
     
+    func loadScores(for date: Date) async {
+        print("🔄 Loading scores for selected date: \(date)")
+        let score = await dataManager.scores(on: date)
+        await MainActor.run {
+            self.recoveryScore = Int(score.recovery.value)
+            self.sleepScore = Int(score.sleep.value)
+            self.strainScore = Int(score.strain.value)
+            self.updateCoachingMessage()
+        }
+    }
+    
     // MARK: - Computed Properties for UI
     
     var hasAnyData: Bool {
