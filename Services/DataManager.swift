@@ -262,6 +262,7 @@ final class DataManager: ObservableObject {
         // Manual metrics: last known value up to D (display only)
         let weight = latestValue(onOrBefore: dayEnd, from: weightSeries)
 
+        let sleepHours = await sleepHoursForDay(dayStart)
         let healthData = HealthData(
             date: dayStart,
             hrv: hrv?.value,
@@ -270,7 +271,7 @@ final class DataManager: ObservableObject {
             energyBurned: energyForDay(dayStart),
             sleepStart: nil,
             sleepEnd: nil,
-            sleepDuration: sleepHoursForDay(dayStart),
+            sleepDuration: sleepHours,
             sleepEfficiency: nil,
             deepSleep: nil,
             remSleep: nil,
@@ -297,21 +298,14 @@ final class DataManager: ObservableObject {
         return nil
     }
 
-    private func sleepHoursForDay(_ dayStart: Date) -> Double? {
+    private func sleepHoursForDay(_ dayStart: Date) async -> Double? {
         let calendar = Calendar.current
         guard let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: dayStart)) else { return nil }
-        // Attempt a direct fetch for that day from HealthKit (category samples)
-        var hours: Double? = nil
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
-            if let secondsMap = try? await HealthKitManager.shared.fetchSleepDaily(startDate: calendar.startOfDay(for: dayStart), endDate: nextDay) {
-                let sec = secondsMap[calendar.startOfDay(for: dayStart)] ?? 0
-                hours = sec > 0 ? sec / 3600.0 : nil
-            }
-            semaphore.signal()
+        if let secondsMap = try? await HealthKitManager.shared.fetchSleepDaily(startDate: calendar.startOfDay(for: dayStart), endDate: nextDay) {
+            let sec = secondsMap[calendar.startOfDay(for: dayStart)] ?? 0
+            return sec > 0 ? sec / 3600.0 : nil
         }
-        semaphore.wait()
-        return hours
+        return nil
     }
     /// Request authorization (centralized)
     func requestHealthKitPermissions() async {
