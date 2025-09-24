@@ -36,6 +36,8 @@ final class HomeViewModel: ObservableObject {
 
     init() {
         setupSubscriptions()
+        // Preserve previous working live/today behavior: compute once at init
+        recomputeScoresMorningSnapshot()
     }
 
     private func setupSubscriptions() {
@@ -47,7 +49,7 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 RHR series updated: \(series.count) points")
                 self?.latestRHR = series.last?.value
-                self?.recomputeScores()
+                // Recovery should be fixed for the day; do not auto-recompute here
             }
             .store(in: &cancellables)
         
@@ -56,7 +58,7 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 HRV series updated: \(series.count) points")
                 self?.latestHRV = series.last?.value
-                self?.recomputeScores()
+                // Recovery should be fixed for the day; do not auto-recompute here
             }
             .store(in: &cancellables)
         
@@ -65,7 +67,7 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 VO2 Max series updated: \(series.count) points")
                 self?.latestVO2Max = series.last?.value
-                self?.recomputeScores()
+                // Do not change scores mid-day here
             }
             .store(in: &cancellables)
         
@@ -74,14 +76,18 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 Weight series updated: \(series.count) points")
                 self?.latestWeight = series.last?.value
-                self?.recomputeScores()
+                // Weight changes shouldn't mutate fixed daily scores
             }
             .store(in: &cancellables)
 
         // Subscribe to today's metrics
         dataManager.$todaySteps
             .receive(on: RunLoop.main)
-            .assign(to: \.todaySteps, on: self)
+            .sink { [weak self] v in
+                self?.todaySteps = v
+                // Strain is the only score that should live-update during the day
+                self?.strainScore = self?.computeStrainScore() ?? 0
+            }
             .store(in: &cancellables)
             
         dataManager.$todayHeartRate
@@ -91,12 +97,19 @@ final class HomeViewModel: ObservableObject {
             
         dataManager.$todayActiveEnergy
             .receive(on: RunLoop.main)
-            .assign(to: \.todayActiveEnergy, on: self)
+            .sink { [weak self] v in
+                self?.todayActiveEnergy = v
+                // Update strain only
+                self?.strainScore = self?.computeStrainScore() ?? 0
+            }
             .store(in: &cancellables)
             
         dataManager.$todaySleepHours
             .receive(on: RunLoop.main)
-            .assign(to: \.todaySleepHours, on: self)
+            .sink { [weak self] v in
+                self?.todaySleepHours = v
+                // Sleep score should be fixed after morning snapshot; don't recompute automatically
+            }
             .store(in: &cancellables)
         
         // Subscribe to authorization state
@@ -124,21 +137,14 @@ final class HomeViewModel: ObservableObject {
     
     // MARK: - Score Computation
     
-    private func recomputeScores() {
-        print("🧮 Recomputing scores...")
-        
-        // Recovery Score (based on HRV and RHR)
+    private func recomputeScoresMorningSnapshot() {
+        print("🧮 Morning snapshot score computation...")
         recoveryScore = computeRecoveryScore()
-        
-        // Sleep Score (based on sleep hours)
         sleepScore = computeSleepScore()
-        
-        // Strain Score (based on activity)
+        // Strain will live-update throughout the day from publishers
         strainScore = computeStrainScore()
-        
-                updateCoachingMessage()
-        
-        print("🧮 Scores updated - Recovery: \(recoveryScore), Sleep: \(sleepScore), Strain: \(strainScore)")
+        updateCoachingMessage()
+        print("🧮 Morning snapshot set - Recovery: \(recoveryScore), Sleep: \(sleepScore), Strain: \(strainScore)")
     }
     
     private func computeRecoveryScore() -> Int {

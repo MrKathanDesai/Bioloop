@@ -4,6 +4,8 @@ import HealthKit
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel.shared
     @State private var selectedDate = Date()
+    @State private var snapshotScore: HealthScore? = nil
+    @State private var isLoadingSnapshot = false
     
     var body: some View {
         NavigationView {
@@ -36,9 +38,9 @@ struct HomeView: View {
                             VStack(spacing: 20) {
                                 // Core rings section - Quick Glance at Recovery, Strain, Sleep
                                 CoreRingsSection(
-                                    recoveryScore: Double(viewModel.recoveryScore),
-                                    sleepScore: Double(viewModel.sleepScore),
-                                    strainScore: Double(viewModel.strainScore),
+                                    recoveryScore: snapshotScore?.recovery.value ?? Double(viewModel.recoveryScore),
+                                    sleepScore: snapshotScore?.sleep.value ?? Double(viewModel.sleepScore),
+                                    strainScore: snapshotScore?.strain.value ?? Double(viewModel.strainScore),
                                     coachingMessage: CoachingMessage(
                                         message: viewModel.coachingMessage,
                                         type: .general,
@@ -274,8 +276,18 @@ struct HomeView: View {
                 viewModel.refreshAll()
             }
             .onChange(of: selectedDate) { _, newDate in
+                let cal = Calendar.current
+                if cal.isDateInToday(newDate) {
+                    snapshotScore = nil
+                    return
+                }
+                isLoadingSnapshot = true
                 Task {
-                    await viewModel.loadScores(for: newDate)
+                    let s = await DataManager.shared.scores(on: newDate)
+                    await MainActor.run {
+                        self.snapshotScore = s
+                        self.isLoadingSnapshot = false
+                    }
                 }
             }
         }
