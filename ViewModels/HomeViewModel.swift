@@ -144,12 +144,13 @@ final class HomeViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] v in
                 self?.todaySleepHours = v
-                self?.attemptMorningSnapshotIfNeeded()
-                // If snapshot already taken and sleep arrives later, update sleep score only
-                if let self = self, self.didTakeMorningSnapshot, self.sleepScore == 0, v > 0 {
+                // Compute sleep score as soon as valid sleep is available, independent of snapshot
+                if let self = self, self.sleepScore == 0, v > 0 {
                     self.sleepScore = self.computeSleepScore()
                     self.updateCoachingMessage()
                 }
+                // Attempt snapshot (may compute recovery/strain) with tightened criteria
+                self?.attemptMorningSnapshotIfNeeded()
             }
             .store(in: &cancellables)
 
@@ -214,8 +215,9 @@ final class HomeViewModel: ObservableObject {
     private var didTakeMorningSnapshot: Bool = false
     private func attemptMorningSnapshotIfNeeded() {
         guard !didTakeMorningSnapshot else { return }
-        let haveCore = ((latestHRV ?? 0) > 0 && (latestRHR ?? 0) > 0) || todaySleepHours > 0
-        if haveCore {
+        // Only take snapshot when both HRV and RHR are available (sleep alone should not trigger recovery snapshot)
+        let haveRecoveryInputs = (latestHRV ?? 0) > 0 && (latestRHR ?? 0) > 0
+        if haveRecoveryInputs {
             recomputeScoresMorningSnapshot()
             didTakeMorningSnapshot = true
         }
