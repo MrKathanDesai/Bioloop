@@ -8,148 +8,236 @@ final class ScoreManager: ObservableObject {
 
     // Inputs
     private let dataManager = DataManager.shared
+    private let calculator = HealthCalculator.shared
     private var cancellables: Set<AnyCancellable> = []
 
     // Outputs (tri-state)
-    @Published private(set) var recoveryScoreState: HomeViewModel.ScoreState = .pending
-    @Published private(set) var sleepScoreState: HomeViewModel.ScoreState = .pending
-    @Published private(set) var strainScoreState: HomeViewModel.ScoreState = .pending
+    @Published private(set) var recoveryScoreState: ScoreState = .pending
+    @Published private(set) var sleepScoreState: ScoreState = .pending
+    @Published private(set) var strainScoreState: ScoreState = .pending
 
     private let logger = Logger(subsystem: "app.bioloop", category: "ScoreManager")
+    
+    // Snapshot management - debounced and idempotent
+    private let snapshotRequest = PassthroughSubject<Void, Never>()
+    private var snapshotCancellable: AnyCancellable?
+    private var didTakeMorningSnapshot = false
+    private var lastSnapshotDate: Date?
 
     private init() {
         setupPipelines()
+        setupSnapshotDebouncing()
+    }
+    
+    private func setupSnapshotDebouncing() {
+        snapshotCancellable = snapshotRequest
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] in
+                self?.performSnapshotIfNeeded()
+            }
+    }
+    
+    private func performSnapshotIfNeeded() {
+        // Only take snapshot if we haven't taken one today and have recent HRV/RHR data
+        let today = Calendar.current.startOfDay(for: Date())
+        let lastSnapshotDay = lastSnapshotDate.map { Calendar.current.startOfDay(for: $0) }
+        
+        guard lastSnapshotDay != today,
+              dataManager.hasRecentHRV,
+              dataManager.hasRecentRHR,
+              let _ = dataManager.latestHRVActual,
+              let _ = dataManager.latestRHRActual else {
+            logger.debug("Skipping snapshot: already taken today or no recent data")
+            return
+        }
+        
+        logger.info("Taking morning snapshot")
+        didTakeMorningSnapshot = true
+        lastSnapshotDate = Date()
+        
+        // Trigger any snapshot-specific logic here
+        // For now, just log the event
+        logger.info("SCORING_EVENT snapshot_taken: recovery=\(self.recoveryScoreState)")
+    }
+    
+    private func requestSnapshot() {
+        snapshotRequest.send()
     }
 
     private func setupPipelines() {
-        // Recovery depends on HRV/RHR values and recency
-        Publishers.CombineLatest4(
-            dataManager.$latestHRV,
-            dataManager.$latestRHR,
-            dataManager.$latestHRVDate,
-            dataManager.$latestRHRDate
+        // Recovery depends on validated HRV/RHR states
+        Publishers.CombineLatest3(
+            dataManager.$hrvState,
+            dataManager.$rhrState,
+            dataManager.$sleepState
         )
         .receive(on: RunLoop.main)
         .debounce(for: .seconds(HealthMetricsConfiguration.snapshotDebounceInterval), scheduler: RunLoop.main)
-        .sink { [weak self] latestHRV, latestRHR, hrvDate, rhrDate in
+        .sink { [weak self] hrvState, rhrState, sleepState in
             guard let self = self else { return }
-            let hasRecentHRV = hrvDate.flatMap { Date().timeIntervalSince($0) <= HealthMetricsConfiguration.recencyWindowWatch } ?? false
-            let hasRecentRHR = rhrDate.flatMap { Date().timeIntervalSince($0) <= HealthMetricsConfiguration.recencyWindowWatch } ?? false
-            let canCompute = hasRecentHRV && hasRecentRHR
-            self.logger.debug("Recovery pipeline: HRV=\(latestHRV ?? 0), RHR=\(latestRHR ?? 0), recentHRV=\(hasRecentHRV), recentRHR=\(hasRecentRHR)")
-            guard canCompute, let hrv = latestHRV, let rhr = latestRHR, hrv > 0, rhr > 0 else {
-                self.recoveryScoreState = .unavailable
+            
+            // Ready set check: all required metrics must be valid
+            guard case .valid(let hrv, _) = hrvState,
+                  case .valid(let rhr, _) = rhrState,
+                  hrv > 0, rhr > 0 else {
+                let reason = self.getRecoveryUnavailableReason(hrvState: hrvState, rhrState: rhrState)
+                self.recoveryScoreState = .unavailable(reason: reason)
+                self.logger.debug("Recovery pipeline: \(reason)")
                 return
             }
-            let score = self.calculateRecoveryFrom(hrv: hrv, rhr: rhr, sleepHours: self.dataManager.todaySleepHours)
-            self.recoveryScoreState = .computed(score)
+            
+            // Optional sleep enhancement
+            let sleepHours = sleepState.value
+            
+            let score = self.calculator.recoveryScore(hrv: hrv, rhr: rhr, sleepHours: sleepHours)
+            self.recoveryScoreState = .computed(Int(score))
+            
+            // Log scoring event
+            self.logger.info("SCORING_EVENT recovery_computed: hrv=\(hrv), rhr=\(rhr), sleep=\(sleepHours ?? 0), score=\(Int(score))")
+            
+            // Request snapshot only from HRV/RHR changes (not sleep)
+            self.requestSnapshot()
         }
         .store(in: &cancellables)
 
-        // Sleep independent: compute when sleep > 0
-        dataManager.$todaySleepHours
+        // Sleep independent: compute when sleep data is valid (NO snapshot trigger)
+        dataManager.$todaySleepSession
             .receive(on: RunLoop.main)
-            .sink { [weak self] hours in
+            .sink { [weak self] sleepSession in
                 guard let self = self else { return }
-                if hours > 0 {
-                    let score = self.calculateSleep(hours: hours)
-                    if case .pending = self.sleepScoreState {
-                        self.sleepScoreState = .computed(score)
-                    }
+                
+                print("🛌 ScoreManager: Sleep session updated, current state: \(self.sleepScoreState)")
+                
+                if let session = sleepSession, session.isComplete {
+                    // Use comprehensive sleep scoring
+                    let score = self.calculator.comprehensiveSleepScore(from: session)
+                    print("🛌 ScoreManager: Computed sleep score: \(Int(score))")
+                    
+                    // Always update the score, not just when pending
+                    self.sleepScoreState = .computed(Int(score))
+                    self.logger.info("SCORING_EVENT sleep_computed: duration=\(session.durationHours)h, efficiency=\(session.efficiency * 100)%, score=\(Int(score))")
                 } else {
-                    self.sleepScoreState = .pending
+                    // Fallback to basic sleep hours if available
+                    if case .valid(let hours, _) = self.dataManager.sleepState, hours > 0 {
+                        let score = self.calculator.sleepScore(sleepHours: hours, efficiency: nil)
+                        print("🛌 ScoreManager: Computed fallback sleep score: \(Int(score))")
+                        
+                        // Always update the score, not just when pending
+                        self.sleepScoreState = .computed(Int(score))
+                        self.logger.info("SCORING_EVENT sleep_computed_fallback: hours=\(hours), score=\(Int(score))")
+                    } else {
+                        let reason = self.getSleepUnavailableReason(sleepState: self.dataManager.sleepState)
+                        print("🛌 ScoreManager: Sleep unavailable: \(reason ?? "unknown")")
+                        self.sleepScoreState = .unavailable(reason: reason)
+                    }
                 }
+                // Note: Sleep changes do NOT trigger snapshots
             }
             .store(in: &cancellables)
 
-        // Strain: recompute on steps/energy updates
-        Publishers.CombineLatest(dataManager.$todaySteps, dataManager.$todayActiveEnergy)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] steps, energy in
-                guard let self = self else { return }
-                let score = self.calculateStrain(steps: steps, energy: energy)
-                self.strainScoreState = .computed(score)
+        // Strain: recompute on validated steps/energy states with personalized baselines
+        Publishers.CombineLatest(
+            dataManager.$stepsState,
+            dataManager.$energyState
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] (stepsState: MetricState<Double>, energyState: MetricState<Double>) in
+            guard let self = self else { return }
+            
+            // Ready set check: at least one activity metric must be valid
+            let steps = stepsState.value
+            let energy = energyState.value
+            
+            guard (steps != nil && steps! > 0) || (energy != nil && energy! > 0) else {
+                let reason = self.getStrainUnavailableReason(stepsState: stepsState, energyState: energyState)
+                self.strainScoreState = .unavailable(reason: reason)
+                return
             }
-            .store(in: &cancellables)
+            
+            // Low-activity early-day guard to avoid inflated strain
+            let stepsVal = steps ?? 0
+            let energyVal = energy ?? 0
+            let minimalStepsThreshold = 1000.0
+            let minimalEnergyThreshold = 200.0
+            if stepsVal < minimalStepsThreshold && energyVal < minimalEnergyThreshold {
+                self.strainScoreState = .computed(0)
+                self.logger.info("SCORING_EVENT strain_guarded_low_activity: steps=\(stepsVal), energy=\(energyVal), score=0")
+                return
+            }
+
+            let stepsBaseline = self.dataManager.baselineSteps
+            let energyBaseline = self.dataManager.baselineActiveEnergy
+            let score = self.calculator.personalizedStrainScore(
+                steps: stepsVal, 
+                energy: energyVal, 
+                stepsBaseline: stepsBaseline, 
+                energyBaseline: energyBaseline
+            )
+            self.strainScoreState = .computed(Int(score))
+            self.logger.info("SCORING_EVENT strain_computed: steps=\(stepsVal), energy=\(energyVal), score=\(Int(score))")
+        }
+        .store(in: &cancellables)
     }
-
-    // MARK: - Calculations (duplicate of VM logic, centralized)
-    private func calculateRecoveryFrom(hrv: Double, rhr: Double, sleepHours: Double) -> Int {
-        // HRV component
-        let hrvScore: Double
-        if hrv >= 40 {
-            hrvScore = 85 + min(15, (hrv - 40) * 0.5)
-        } else if hrv >= 30 {
-            hrvScore = 70 + ((hrv - 30) / 10) * 15
-        } else if hrv >= 20 {
-            hrvScore = 50 + ((hrv - 20) / 10) * 20
-        } else {
-            hrvScore = max(10, hrv * 2.5)
+    
+    // MARK: - Helper Methods for Unavailable Reasons
+    
+    private func getRecoveryUnavailableReason(hrvState: MetricState<Double>, rhrState: MetricState<Double>) -> String {
+        switch (hrvState, rhrState) {
+        case (.missing, .missing):
+            return "No HRV or RHR data"
+        case (.missing, _):
+            return "No HRV data"
+        case (_, .missing):
+            return "No RHR data"
+        case (.stale(let hrvDate), .stale(let rhrDate)):
+            return "HRV and RHR data are stale (HRV: \(formatDate(hrvDate)), RHR: \(formatDate(rhrDate)))"
+        case (.stale(let date), _):
+            return "HRV data is stale (\(formatDate(date)))"
+        case (_, .stale(let date)):
+            return "RHR data is stale (\(formatDate(date)))"
+        case (.valid(let hrv, _), .valid(let rhr, _)):
+            if hrv <= 0 || rhr <= 0 {
+                return "Invalid HRV or RHR values"
+            }
+            return "Unknown error"
         }
-
-        // RHR component
-        let rhrScore: Double
-        if rhr <= 55 {
-            rhrScore = 90 + min(10, (55 - rhr) * 0.5)
-        } else if rhr <= 65 {
-            rhrScore = 75 + ((65 - rhr) / 10) * 15
-        } else if rhr <= 80 {
-            rhrScore = 50 + ((80 - rhr) / 15) * 25
-        } else {
-            rhrScore = max(10, (120 - rhr) * 0.8)
-        }
-
-        var score = (hrvScore + rhrScore) / 2
-
-        // Sleep multiplier
-        if sleepHours > 0 {
-            let multiplier: Double
-            if sleepHours >= 7 && sleepHours <= 9 { multiplier = 1.1 }
-            else if sleepHours >= 6 && sleepHours <= 10 { multiplier = 1.0 }
-            else { multiplier = 0.85 }
-            score *= multiplier
-        }
-
-        return Int(max(0, min(100, score)))
     }
-
-    private func calculateSleep(hours: Double) -> Int {
-        let score: Double
-        if hours >= 7.5 && hours <= 8.5 {
-            score = 95 + min(5, (8.5 - abs(hours - 8)) * 2)
-        } else if hours >= 7 && hours <= 9 {
-            score = 85 + ((9 - abs(hours - 8)) / 1) * 10
-        } else if hours >= 6.5 && hours <= 9.5 {
-            score = 70 + ((9.5 - abs(hours - 8)) / 1.5) * 15
-        } else if hours >= 6 && hours <= 10 {
-            score = 50 + ((10 - abs(hours - 8)) / 2) * 20
-        } else if hours >= 5 && hours <= 11 {
-            score = 30 + ((11 - abs(hours - 8)) / 3) * 20
-        } else {
-            score = max(10, 30 - abs(hours - 8) * 2)
+    
+    private func getSleepUnavailableReason(sleepState: MetricState<Double>) -> String {
+        switch sleepState {
+        case .missing:
+            return "No sleep data"
+        case .stale(let date):
+            return "Sleep data is stale (\(formatDate(date)))"
+        case .valid(let hours, _):
+            if hours <= 0 {
+                return "Invalid sleep duration"
+            }
+            return "Unknown error"
         }
-        return Int(max(0, min(100, score)))
     }
-
-    private func calculateStrain(steps: Double, energy: Double) -> Int {
-        // Step component
-        let stepScore: Double
-        if steps >= 12000 { stepScore = 90 + min(10, (steps - 12000) / 3000 * 10) }
-        else if steps >= 8000 { stepScore = 70 + ((steps - 8000) / 4000) * 20 }
-        else if steps >= 5000 { stepScore = 40 + ((steps - 5000) / 3000) * 30 }
-        else if steps >= 2000 { stepScore = 20 + ((steps - 2000) / 3000) * 20 }
-        else { stepScore = max(5, steps / 2000 * 20) }
-
-        // Energy component
-        let energyScore: Double
-        if energy >= 600 { energyScore = 85 + min(15, (energy - 600) / 200 * 15) }
-        else if energy >= 400 { energyScore = 65 + ((energy - 400) / 200) * 20 }
-        else if energy >= 200 { energyScore = 35 + ((energy - 200) / 200) * 30 }
-        else if energy >= 100 { energyScore = 15 + ((energy - 100) / 100) * 20 }
-        else { energyScore = max(5, energy / 100 * 15) }
-
-        let score = (stepScore * 0.4) + (energyScore * 0.6)
-        return Int(max(0, min(100, score)))
+    
+    private func getStrainUnavailableReason(stepsState: MetricState<Double>, energyState: MetricState<Double>) -> String {
+        switch (stepsState, energyState) {
+        case (.missing, .missing):
+            return "No activity data"
+        case (.missing, .stale), (.stale, .missing), (.stale, .stale):
+            return "Activity data is stale"
+        case (.valid(let steps, _), .valid(let energy, _)):
+            if steps <= 0 && energy <= 0 {
+                return "No activity recorded"
+            }
+            return "Unknown error"
+        default:
+            return "Insufficient activity data"
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
 }
 

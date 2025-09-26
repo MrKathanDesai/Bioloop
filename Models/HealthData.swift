@@ -3,6 +3,108 @@ import HealthKit
 
 // MARK: - Core Health Data Models
 
+// MARK: - Sleep Data Models
+
+/// Comprehensive sleep session with all metrics
+struct SleepSession: Identifiable, Codable {
+    let id: UUID
+    let startDate: Date
+    let endDate: Date
+    let duration: TimeInterval
+    let efficiency: Double          // asleep / inBed (0-1)
+    let stages: SleepStages
+    let wakeEvents: Int
+    let source: String              // watch, iPhone, 3rd-party
+    let metrics: SleepMetrics
+    
+    init(startDate: Date, endDate: Date, duration: TimeInterval, efficiency: Double, stages: SleepStages, wakeEvents: Int, source: String, metrics: SleepMetrics) {
+        self.id = UUID()
+        self.startDate = startDate
+        self.endDate = endDate
+        self.duration = duration
+        self.efficiency = efficiency
+        self.stages = stages
+        self.wakeEvents = wakeEvents
+        self.source = source
+        self.metrics = metrics
+    }
+    
+    var durationHours: Double {
+        return duration / 3600.0
+    }
+    
+    var isComplete: Bool {
+        return endDate > startDate && duration > 0
+    }
+}
+
+/// Sleep stage breakdown
+struct SleepStages: Codable {
+    let core: TimeInterval
+    let deep: TimeInterval
+    let rem: TimeInterval
+    let awake: TimeInterval
+    
+    var totalAsleep: TimeInterval {
+        return core + deep + rem
+    }
+    
+    var totalInBed: TimeInterval {
+        return core + deep + rem + awake
+    }
+    
+    var remPercentage: Double {
+        let total = totalAsleep
+        return total > 0 ? (rem / total) * 100 : 0
+    }
+    
+    var deepPercentage: Double {
+        let total = totalAsleep
+        return total > 0 ? (deep / total) * 100 : 0
+    }
+    
+    var corePercentage: Double {
+        let total = totalAsleep
+        return total > 0 ? (core / total) * 100 : 0
+    }
+}
+
+/// Advanced sleep metrics for scoring
+struct SleepMetrics: Codable {
+    let waso: TimeInterval          // Wake After Sleep Onset
+    let fragmentationIndex: Double  // wake events per hour
+    let sleepLatency: TimeInterval  // time to fall asleep
+    let consistency: Double         // bedtime/wake time consistency (0-1)
+    
+    var wasoMinutes: Double {
+        return waso / 60.0
+    }
+    
+    var fragmentationScore: Double {
+        // Lower fragmentation = better (0-100 scale)
+        return max(0, 100 - (fragmentationIndex * 10))
+    }
+}
+
+/// Daily sleep summary (aggregated from sessions)
+struct DailySleepSummary: Codable {
+    let date: Date
+    let primarySession: SleepSession?
+    let totalDuration: TimeInterval
+    let averageEfficiency: Double
+    let totalWakeEvents: Int
+    let bedtime: Date?
+    let wakeTime: Date?
+    
+    var durationHours: Double {
+        return totalDuration / 3600.0
+    }
+    
+    var hasData: Bool {
+        return primarySession != nil && totalDuration > 0
+    }
+}
+
 /// Raw health data from HealthKit
 struct HealthData {
     var date: Date
@@ -10,18 +112,26 @@ struct HealthData {
     var restingHeartRate: Double?  // Resting Heart Rate (BPM)
     var heartRate: Double?    // Active Heart Rate (BPM)
     var energyBurned: Double? // Active Energy Burned (kcal)
-    var sleepStart: Date?     // Sleep start time
-    var sleepEnd: Date?       // Sleep end time
-    var sleepDuration: Double? // Sleep duration (hours)
-    var sleepEfficiency: Double? // Sleep efficiency (0-1)
-    var deepSleep: Double?    // Deep sleep duration (hours)
-    var remSleep: Double?     // REM sleep duration (hours)
-    var wakeEvents: Int?      // Number of wake events
+    var sleepSession: SleepSession? // Complete sleep session
+    var sleepDuration: Double? // Sleep duration (hours) - derived from session
+    var sleepEfficiency: Double? // Sleep efficiency (0-1) - derived from session
+    var deepSleep: Double?    // Deep sleep duration (hours) - derived from session
+    var remSleep: Double?     // REM sleep duration (hours) - derived from session
+    var wakeEvents: Int?      // Number of wake events - derived from session
     var workoutMinutes: Double? // Workout duration (minutes)
     var vo2Max: Double?       // VO2 Max (ml/kg/min)
     var weight: Double?       // Body weight (kg)
     var leanBodyMass: Double? // Lean body mass (kg)
     var bodyFat: Double?      // Body fat percentage (%)
+    
+    // Legacy compatibility - derive from sleep session
+    var sleepStart: Date? {
+        return sleepSession?.startDate
+    }
+    
+    var sleepEnd: Date? {
+        return sleepSession?.endDate
+    }
 
     /// Check if we have enough data for recovery score
     var hasRecoveryData: Bool {
@@ -36,6 +146,74 @@ struct HealthData {
     /// Check if we have enough data for strain score
     var hasStrainData: Bool {
         return energyBurned != nil || workoutMinutes != nil || heartRate != nil
+    }
+}
+
+/// Tri-state scoring system for unambiguous score states
+enum ScoreState: Equatable, CustomStringConvertible {
+    case pending
+    case unavailable(reason: String?)
+    case computed(Int) // 0-100
+    
+    var isComputed: Bool {
+        if case .computed = self { return true }
+        return false
+    }
+    
+    var value: Int? {
+        if case .computed(let val) = self { return val }
+        return nil
+    }
+    
+    var reason: String? {
+        if case .unavailable(let reason) = self { return reason }
+        return nil
+    }
+    
+    var description: String {
+        switch self {
+        case .pending:
+            return "pending"
+        case .unavailable(let reason):
+            return "unavailable(\(reason ?? "no reason"))"
+        case .computed(let value):
+            return "computed(\(value))"
+        }
+    }
+}
+
+/// Tri-state metric validation for data quality
+enum MetricState<T>: Equatable where T: Equatable {
+    case valid(T, Date)     // value with lastSeen date
+    case stale(Date)        // lastSeen date
+    case missing
+
+    var value: T? {
+        if case .valid(let val, _) = self { return val }
+        return nil
+    }
+
+    var lastSeen: Date? {
+        switch self {
+        case .valid(_, let date): return date
+        case .stale(let date): return date
+        case .missing: return nil
+        }
+    }
+
+    var isStale: Bool {
+        if case .stale = self { return true }
+        return false
+    }
+
+    var isMissing: Bool {
+        if case .missing = self { return true }
+        return false
+    }
+
+    var isValid: Bool {
+        if case .valid = self { return true }
+        return false
     }
 }
 

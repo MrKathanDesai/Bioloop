@@ -428,8 +428,8 @@ private struct HealthStatusWidget: View {
         let id = UUID()
         let title: String
         let icon: String
-        let hasData: Bool
-        let isOK: Bool
+        let state: MetricState<Double>
+        let healthyRange: ClosedRange<Double>
     }
 
     private enum VitalState {
@@ -439,81 +439,63 @@ private struct HealthStatusWidget: View {
     }
 
     private var vitals: [Vital] {
-        let hrvHas = dm.hasDisplayableHRV && (dm.latestHRV ?? 0) > 0
-        let rhrHas = dm.hasDisplayableRHR && (dm.latestRHR ?? 0) > 0
-        let respHas = dm.todayRespiratoryRate > 0
-        let spo2Has = dm.todaySpO2Percent > 0
-        let tempHas = dm.todayBodyTemperatureC > 0
-
-        // Range-based evaluation
-        let hrvVal = dm.latestHRV ?? 0
-        let rhrVal = dm.latestRHR ?? 0
-        let respVal = dm.todayRespiratoryRate
-        let spo2Val = dm.todaySpO2Percent
-        let tempVal = dm.todayBodyTemperatureC
-        
-        let hrvOK = hrvHas && dm.hasRecentHRV && (hrvVal >= 30 && hrvVal <= 60)
-        let rhrOK = rhrHas && dm.hasRecentRHR && (rhrVal >= 50 && rhrVal <= 70)
-        let respOK = respHas && (respVal >= 12 && respVal <= 20)
-        let spo2OK = spo2Has && (spo2Val >= 95 && spo2Val <= 100)
-        let tempOK = tempHas && (tempVal >= 36.1 && tempVal <= 37.2)
         return [
-            Vital(title: "HRV", icon: "waveform.path.ecg", hasData: hrvHas, isOK: hrvOK),
-            Vital(title: "RHR", icon: "heart.circle", hasData: rhrHas, isOK: rhrOK),
-            Vital(title: "Resp", icon: "lungs.fill", hasData: respHas, isOK: respOK),
-            Vital(title: "SpO2", icon: "drop.fill", hasData: spo2Has, isOK: spo2OK),
-            Vital(title: "Temp", icon: "thermometer", hasData: tempHas, isOK: tempOK)
+            Vital(title: "HRV", icon: "waveform.path.ecg", state: dm.hrvState, healthyRange: healthyRangeForHRV()),
+            Vital(title: "RHR", icon: "heart.circle", state: dm.rhrState, healthyRange: healthyRangeForRHR()),
+            Vital(title: "Resp", icon: "lungs.fill", state: dm.respState, healthyRange: 12...20),
+            Vital(title: "SpO2", icon: "drop.fill", state: dm.spo2State, healthyRange: 95...100),
+            Vital(title: "Temp", icon: "thermometer", state: dm.tempState, healthyRange: healthyRangeForTemp())
         ]
+    }
+
+    private func healthyRangeForHRV() -> ClosedRange<Double> {
+        if let base = dm.baselineHRV {
+            let minV = max(20, base.mean - base.stdDev)
+            let maxV = min(120, base.mean + base.stdDev)
+            if minV < maxV { return minV...maxV }
+        }
+        return 40...80
+    }
+
+    private func healthyRangeForRHR() -> ClosedRange<Double> {
+        if let base = dm.baselineRHR {
+            let minV = max(40, base.mean - base.stdDev)
+            let maxV = min(80, base.mean + base.stdDev)
+            if minV < maxV { return minV...maxV }
+        }
+        return 50...65
+    }
+
+    private func healthyRangeForTemp() -> ClosedRange<Double> {
+        // If we have a valid temp and it's likely a wrist delta (small magnitude), center near 0
+        if case .valid(let v, _) = dm.tempState, abs(v) < 5 {
+            return -0.5...0.5
+        }
+        return 36.1...37.6
     }
     
     private func calculateYOffset(for vital: Vital, index: Int) -> CGFloat {
-        guard vital.hasData else { return 0 } // Center for missing data
-        
-        let maxOffset: CGFloat = 45 // Max distance above/below center
-        let value: Double
-        let minRange: Double
-        let maxRange: Double
-        
-        switch vital.title {
-        case "HRV":
-            value = dm.latestHRV ?? 0
-            minRange = 30
-            maxRange = 60
-            
-        case "RHR":
-            value = dm.latestRHR ?? 0
-            minRange = 50
-            maxRange = 70
-            
-        case "Resp":
-            value = dm.todayRespiratoryRate
-            minRange = 12
-            maxRange = 20
-            
-        case "SpO2":
-            value = dm.todaySpO2Percent
-            minRange = 95
-            maxRange = 100
-            
-        case "Temp":
-            value = dm.todayBodyTemperatureC
-            minRange = 36.1
-            maxRange = 37.2
-            
-        default:
-            return 0
+        guard case .valid(let value, _) = vital.state else { return 0 }
+        let maxOffset: CGFloat = 45
+        var normalizedPosition = normalizeValueClamped(value, healthy: vital.healthyRange, maxDeviationFactor: 2.0)
+        // Direction tweaks: for RHR, lower is better so invert vertical sense (lower-than-center should go up)
+        if vital.title == "RHR" {
+            normalizedPosition = -normalizedPosition
         }
-        
-        let normalizedPosition = normalizeValue(value, min: minRange, max: maxRange)
         return CGFloat(normalizedPosition) * maxOffset
     }
     
-    private func normalizeValue(_ value: Double, min: Double, max: Double) -> Double {
-        // Returns -1 to 1, where 0 is center of healthy range
-        let center = (min + max) / 2
-        let range = max - min
-        let deviation = (value - center) / (range / 2)
-        return Swift.max(-1, Swift.min(1, -deviation)) // Invert so low values go down
+    private func normalizeValueClamped(_ value: Double, healthy: ClosedRange<Double>, maxDeviationFactor: Double) -> Double {
+        let minHealthy = healthy.lowerBound
+        let maxHealthy = healthy.upperBound
+        guard minHealthy < maxHealthy else { return 0 }
+        let center = (minHealthy + maxHealthy) / 2.0
+        let halfBand = (maxHealthy - minHealthy) / 2.0
+        let maxDev = halfBand * Swift.max(0.1, maxDeviationFactor)
+        let deviation = value - center
+        let normalized = deviation / maxDev
+        // Inversion: higher-than-center -> positive offset (up), lower -> negative
+        return Swift.max(-1.0, Swift.min(1.0, normalized))
     }
 
     var body: some View {
@@ -549,7 +531,16 @@ private struct HealthStatusWidget: View {
                 // Markers positioned by value
                 HStack {
                     ForEach(Array(vitals.enumerated()), id: \.element.id) { index, v in
-                        let state: VitalState = v.hasData ? (v.isOK ? .ok : .warn) : .missing
+                        let state: VitalState = {
+                            switch v.state {
+                            case .valid(let val, _):
+                                return v.healthyRange.contains(val) ? .ok : .warn
+                            case .stale:
+                                return .missing
+                            case .missing:
+                                return .missing
+                            }
+                        }()
                         let yOffset = calculateYOffset(for: v, index: index)
                         ZStack {
                             Circle()
@@ -571,7 +562,16 @@ private struct HealthStatusWidget: View {
             // Labels row
             HStack {
                 ForEach(vitals) { v in
-                    let state: VitalState = v.hasData ? (v.isOK ? .ok : .warn) : .missing
+                    let state: VitalState = {
+                        switch v.state {
+                        case .valid(let val, _):
+                            return v.healthyRange.contains(val) ? .ok : .warn
+                        case .stale:
+                            return .missing
+                        case .missing:
+                            return .missing
+                        }
+                    }()
                     VStack(spacing: 6) {
                         Image(systemName: v.icon)
                             .foregroundColor(state == .ok ? .primary : (state == .warn ? .red : .secondary))

@@ -62,10 +62,10 @@ struct HealthDataDiagnosticsView: View {
                         Text("Biology Metrics (Latest)")
                             .font(.headline)
                         
-                        MetricRow(label: "VO₂ Max", value: dataManager.latestVO2Max != nil ? String(format: "%.1f ml/kg/min", dataManager.latestVO2Max!) : "—")
-                        MetricRow(label: "HRV", value: dataManager.latestHRV != nil ? String(format: "%.1f ms", dataManager.latestHRV!) : "—")
-                        MetricRow(label: "Resting HR", value: dataManager.latestRHR != nil ? "\(Int(dataManager.latestRHR!)) BPM" : "—")
-                        MetricRow(label: "Weight", value: dataManager.latestWeight != nil ? String(format: "%.1f kg", dataManager.latestWeight!) : "—")
+                        MetricRow(label: "VO₂ Max", value: dataManager.latestVO2MaxActual != nil ? String(format: "%.1f ml/kg/min", dataManager.latestVO2MaxActual!.value) : "—")
+                        MetricRow(label: "HRV", value: dataManager.latestHRVActual != nil ? String(format: "%.1f ms", dataManager.latestHRVActual!.value) : "—")
+                        MetricRow(label: "Resting HR", value: dataManager.latestRHRActual != nil ? "\(Int(dataManager.latestRHRActual!.value)) BPM" : "—")
+                        MetricRow(label: "Weight", value: dataManager.latestWeightActual != nil ? String(format: "%.1f kg", dataManager.latestWeightActual!.value) : "—")
                     }
                     .padding()
                     .background(Color(.systemGray6))
@@ -151,10 +151,10 @@ struct HealthDataDiagnosticsView: View {
         }
     }
 
-    private func scoreText(_ state: HomeViewModel.ScoreState) -> String {
+    private func scoreText(_ state: ScoreState) -> String {
         switch state {
         case .pending: return "pending"
-        case .unavailable: return "—"
+        case .unavailable(let reason): return reason ?? "—"
         case .computed(let v): return String(v)
         }
     }

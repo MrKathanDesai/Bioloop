@@ -217,53 +217,80 @@ struct BiologyView: View {
     private func contentSection(healthData: HealthData) -> some View {
                     VStack(spacing: BiologySpacing.cardSpacing) {
             // Cardio Fitness (VO2 Max) with percentile chart
+            let vo2Value = dataManager.latestVO2MaxActual?.value ?? 0
+            let vo2HasData = dataManager.hasRecentVO2Max
+            let vo2History = dataManager.vo2MaxSeries
+            
+            let _ = print("🧬 BiologyView: VO2 Max - value: \(vo2Value), hasData: \(vo2HasData), history count: \(vo2History.count)")
+            
+            // Consider VO2 Max available if we either have a recent flag, a non-zero latest value, or any history points
+            let vo2DisplayHasData = vo2HasData || vo2Value > 0 || !vo2History.isEmpty
+            
             VO2MaxCard(
-                value: dataManager.latestVO2Max ?? 0,
-                history: dataManager.vo2MaxSeries,
+                value: vo2Value,
+                history: vo2History,
                 userAge: 30, // Default age - could be enhanced to calculate from birth date
-                hasData: dataManager.hasDisplayableVO2Max
+                hasData: vo2DisplayHasData
             )
                         
                         HStack(spacing: BiologySpacing.sideBySideSpacing) {
                 // HRV with baseline comparison
+                let hrvValue = dataManager.latestHRVActual?.value ?? 0
+                let hrvHasData = dataManager.hasRecentHRV
+                let hrvHistory = dataManager.hrvSeries
+                
+                let _ = print("🧬 BiologyView: HRV - value: \(hrvValue), hasData: \(hrvHasData), history count: \(hrvHistory.count)")
+                
                 HRVCard(
-                    currentValue: dataManager.latestHRV ?? 0,
-                    history: dataManager.hrvSeries,
-                    hasData: dataManager.hasDisplayableHRV
+                    currentValue: hrvValue,
+                    history: hrvHistory,
+                    hasData: hrvHasData
                 )
                             
                 // Resting Heart Rate with zones
+                let rhrValue = dataManager.latestRHRActual?.value ?? 0
+                let rhrHasData = dataManager.hasRecentRHR
+                let rhrHistory = dataManager.rhrSeries
+                
+                let _ = print("🧬 BiologyView: RHR - value: \(rhrValue), hasData: \(rhrHasData), history count: \(rhrHistory.count)")
+                
                 RestingHeartRateCard(
-                    currentValue: dataManager.latestRHR ?? 0,
-                    history: dataManager.rhrSeries,
-                    hasData: dataManager.hasDisplayableRHR
+                    currentValue: rhrValue,
+                    history: rhrHistory,
+                    hasData: rhrHasData
                 )
                         }
                         
             // Weight tracking with BMI context
+            let weightValue = dataManager.latestWeightActual?.value ?? 0
+            let weightHasData = dataManager.hasRecentWeight
+            let weightHistory = dataManager.weightSeries
+            
+            let _ = print("🧬 BiologyView: Weight - value: \(weightValue), hasData: \(weightHasData), history count: \(weightHistory.count)")
+            
             WeightTrackingCard(
-                currentWeight: dataManager.latestWeight ?? 0,
-                history: dataManager.weightSeries,
+                currentWeight: weightValue,
+                history: weightHistory,
                 height: 175, // Default height in cm - could be enhanced to fetch from HealthKit
-                hasData: dataManager.hasDisplayableWeight
+                hasData: weightHasData
             )
                         
                         VStack(spacing: BiologySpacing.cardSpacing) {
                 // Body composition pie chart (full width)
                 BodyCompositionCard(
-                    weight: dataManager.latestWeight,
+                    weight: dataManager.latestWeightActual?.value,
                     leanBodyMass: dataManager.latestLeanBodyMass,
                     bodyFat: dataManager.latestBodyFatPercentage,
-                    hasData: dataManager.hasDisplayableWeight || (dataManager.latestLeanBodyMass != nil) || (dataManager.latestBodyFatPercentage != nil)
+                    hasData: dataManager.hasRecentWeight || (dataManager.latestLeanBodyMass != nil) || (dataManager.latestBodyFatPercentage != nil)
                 )
                 .frame(maxWidth: .infinity)
                             
                 // Health score summary (full width)
                 HealthScoreCard(
-                    vo2Max: dataManager.hasRecentVO2Max ? (dataManager.latestVO2Max ?? 0) : 0,
-                    hrv: dataManager.hasRecentHRV ? (dataManager.latestHRV ?? 0) : 0,
-                    rhr: dataManager.hasRecentRHR ? (dataManager.latestRHR ?? 0) : 0,
-                    weight: dataManager.latestWeight,
+                    vo2Max: dataManager.hasRecentVO2Max ? (dataManager.latestVO2MaxActual?.value ?? 0) : 0,
+                    hrv: dataManager.hasRecentHRV ? (dataManager.latestHRVActual?.value ?? 0) : 0,
+                    rhr: dataManager.hasRecentRHR ? (dataManager.latestRHRActual?.value ?? 0) : 0,
+                    weight: dataManager.latestWeightActual?.value,
                     age: calculateAge(), // Calculate age from user profile or use default
                     hasRecentData: dataManager.canComputeRecoveryScore || (dataManager.hasRecentVO2Max && (dataManager.hasRecentHRV || dataManager.hasRecentRHR))
                 )
@@ -324,20 +351,19 @@ struct BiologyView: View {
                 // Create HealthData from DataManager's latest values (LKV fallback)
                 let rawData = HealthData(
                     date: Date(),
-                    hrv: dataManager.latestHRV,
-                    restingHeartRate: dataManager.latestRHR,
+                    hrv: dataManager.latestHRVActual?.value,
+                    restingHeartRate: dataManager.latestRHRActual?.value,
                     heartRate: dataManager.todayHeartRate > 0 ? dataManager.todayHeartRate : nil,
                     energyBurned: dataManager.todayActiveEnergy > 0 ? dataManager.todayActiveEnergy : nil,
-                    sleepStart: nil,
-                    sleepEnd: nil,
+                    sleepSession: dataManager.todaySleepSession,
                     sleepDuration: dataManager.todaySleepHours > 0 ? dataManager.todaySleepHours : nil,
-                    sleepEfficiency: nil,
-                    deepSleep: nil,
-                    remSleep: nil,
-                    wakeEvents: nil,
+                    sleepEfficiency: dataManager.todaySleepSession?.efficiency,
+                    deepSleep: dataManager.todaySleepSession.map { $0.stages.deep / 3600.0 },
+                    remSleep: dataManager.todaySleepSession.map { $0.stages.rem / 3600.0 },
+                    wakeEvents: dataManager.todaySleepSession?.wakeEvents,
                     workoutMinutes: nil,
-                    vo2Max: dataManager.latestVO2Max,
-                    weight: dataManager.latestWeight,
+                    vo2Max: dataManager.latestVO2MaxActual?.value,
+                    weight: dataManager.latestWeightActual?.value,
                     leanBodyMass: dataManager.latestLeanBodyMass,
                     bodyFat: dataManager.latestBodyFatPercentage
                 )
@@ -353,10 +379,10 @@ struct BiologyView: View {
                 
                 isLoading = false
                 print("🏥 Biology data loaded with latest values:")
-                print("   VO2 Max: \(dataManager.latestVO2Max ?? 0)")
-                print("   HRV: \(dataManager.latestHRV ?? 0)")
-                print("   RHR: \(dataManager.latestRHR ?? 0)")
-                print("   Weight: \(dataManager.latestWeight ?? 0)")
+                print("   VO2 Max: \(dataManager.latestVO2MaxActual?.value ?? 0)")
+                print("   HRV: \(dataManager.latestHRVActual?.value ?? 0)")
+                print("   RHR: \(dataManager.latestRHRActual?.value ?? 0)")
+                print("   Weight: \(dataManager.latestWeightActual?.value ?? 0)")
             }
         }
     }

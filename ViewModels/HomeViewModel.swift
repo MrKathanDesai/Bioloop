@@ -10,14 +10,7 @@ final class HomeViewModel: ObservableObject {
     private let scoreManager = ScoreManager.shared
     private var cancellables = Set<AnyCancellable>()
 
-    // Score tri-state
-    enum ScoreState: Equatable {
-        case pending
-        case computed(Int)
-        case unavailable
-    }
-    
-    // Published UI state
+    // Published UI state (bridged from ScoreManager)
     @Published var recoveryScoreState: ScoreState = .pending
     @Published var sleepScoreState: ScoreState = .pending
     @Published var strainScoreState: ScoreState = .pending
@@ -46,19 +39,6 @@ final class HomeViewModel: ObservableObject {
     // Coaching message
     @Published var coachingMessage: String = "Welcome to Bioloop! Connect your health data to get started."
 
-    // Temporary compatibility for existing UI (to be removed after UI migration)
-    var recoveryScore: Int {
-        if case .computed(let v) = recoveryScoreState { return v }
-        return 0
-    }
-    var sleepScore: Int {
-        if case .computed(let v) = sleepScoreState { return v }
-        return 0
-    }
-    var strainScore: Int {
-        if case .computed(let v) = strainScoreState { return v }
-        return 0
-    }
 
     // Snapshot logic now delegated to ScoreManager (pipelines). Keep minimal compatibility.
     private let snapshotRequest = PassthroughSubject<Void, Never>()
@@ -69,7 +49,7 @@ final class HomeViewModel: ObservableObject {
         // Morning snapshot will be computed once when first data arrives
         snapshotCancellable = snapshotRequest
             .debounce(for: .seconds(HealthMetricsConfiguration.snapshotDebounceInterval), scheduler: RunLoop.main)
-            .sink { [weak self] in
+            .sink { _ in
                 print("⏱️ Debounced snapshotRequest fired (handled by ScoreManager pipelines)")
             }
     }
@@ -108,10 +88,7 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 RHR series updated: \(series.count) points")
                 self?.latestRHR = series.last?.value
-                let haveRecent = self?.dataManager.hasRecentHRV == true && self?.dataManager.hasRecentRHR == true
-                print("📝 RHR arrived -> requesting snapshot attempt (hasRecentHRV=\(self?.dataManager.hasRecentHRV == true), hasRecentRHR=\(self?.dataManager.hasRecentRHR == true), canCompute=\(haveRecent))")
-                self?.snapshotRequest.send()
-                // ScoreManager handles recovery; VM only updates UI state below
+                // ScoreManager handles recovery scoring and snapshot requests
             }
             .store(in: &cancellables)
         
@@ -120,10 +97,7 @@ final class HomeViewModel: ObservableObject {
             .sink { [weak self] series in
                 print("🔗 HRV series updated: \(series.count) points")
                 self?.latestHRV = series.last?.value
-                let haveRecent = self?.dataManager.hasRecentHRV == true && self?.dataManager.hasRecentRHR == true
-                print("📝 HRV arrived -> requesting snapshot attempt (hasRecentHRV=\(self?.dataManager.hasRecentHRV == true), hasRecentRHR=\(self?.dataManager.hasRecentRHR == true), canCompute=\(haveRecent))")
-                self?.snapshotRequest.send()
-                // ScoreManager handles recovery; VM only updates UI state below
+                // ScoreManager handles recovery scoring and snapshot requests
             }
             .store(in: &cancellables)
 
@@ -159,7 +133,7 @@ final class HomeViewModel: ObservableObject {
             
         dataManager.$todayHeartRate
             .receive(on: RunLoop.main)
-            .assign(to: \.todayHeartRate, on: self)
+            .sink { [weak self] v in self?.todayHeartRate = v }
             .store(in: &cancellables)
             
         dataManager.$todayActiveEnergy
@@ -178,26 +152,38 @@ final class HomeViewModel: ObservableObject {
                 // ScoreManager computes; VM mirrors below
             }
             .store(in: &cancellables)
+            
+        // Subscribe to comprehensive sleep session data
+        dataManager.$todaySleepSession
+            .receive(on: RunLoop.main)
+            .sink { [weak self] session in
+                if let session = session {
+                    print("🛌 Sleep session updated: \(session.durationHours)h, efficiency: \(session.efficiency * 100)%")
+                } else {
+                    print("🛌 No sleep session data available")
+                }
+            }
+            .store(in: &cancellables)
 
         // Nutrition metrics
         dataManager.$todayDietaryEnergy
             .receive(on: RunLoop.main)
-            .assign(to: \.todayDietaryEnergy, on: self)
+            .sink { [weak self] v in self?.todayDietaryEnergy = v }
             .store(in: &cancellables)
 
         dataManager.$todayProteinGrams
             .receive(on: RunLoop.main)
-            .assign(to: \.todayProteinGrams, on: self)
+            .sink { [weak self] v in self?.todayProteinGrams = v }
             .store(in: &cancellables)
 
         dataManager.$todayCarbsGrams
             .receive(on: RunLoop.main)
-            .assign(to: \.todayCarbsGrams, on: self)
+            .sink { [weak self] v in self?.todayCarbsGrams = v }
             .store(in: &cancellables)
 
         dataManager.$todayFatGrams
             .receive(on: RunLoop.main)
-            .assign(to: \.todayFatGrams, on: self)
+            .sink { [weak self] v in self?.todayFatGrams = v }
             .store(in: &cancellables)
         
         // Subscribe to authorization state
@@ -213,12 +199,12 @@ final class HomeViewModel: ObservableObject {
             
         dataManager.$isLoading
             .receive(on: RunLoop.main)
-            .assign(to: \.isLoading, on: self)
+            .sink { [weak self] v in self?.isLoading = v }
             .store(in: &cancellables)
             
         dataManager.$errorMessage
             .receive(on: RunLoop.main)
-            .assign(to: \.errorMessage, on: self)
+            .sink { [weak self] v in self?.errorMessage = v }
             .store(in: &cancellables)
         
         print("🔗 HomeViewModel subscriptions setup completed")
@@ -322,9 +308,9 @@ final class HomeViewModel: ObservableObject {
             coachingMessage = "Connect your health data to see personalized insights!"
             return
         }
-        let recoveryVal: Int? = { if case .computed(let v) = recoveryScoreState { return v } else { return nil } }()
-        let sleepVal: Int? = { if case .computed(let v) = sleepScoreState { return v } else { return nil } }()
-        let strainVal: Int? = { if case .computed(let v) = strainScoreState { return v } else { return nil } }()
+        let recoveryVal: Int? = recoveryScoreState.value
+        let sleepVal: Int? = sleepScoreState.value
+        let strainVal: Int? = strainScoreState.value
         if recoveryVal == nil && sleepVal == nil && strainVal == nil {
             coachingMessage = "Keep wearing your Apple Watch to collect health metrics for personalized insights."
             return
@@ -381,9 +367,9 @@ final class HomeViewModel: ObservableObject {
         let r = Int(score.recovery.value)
         let s = Int(score.sleep.value)
         let st = Int(score.strain.value)
-        self.recoveryScoreState = r > 0 ? .computed(r) : .unavailable
-        self.sleepScoreState = s > 0 ? .computed(s) : .unavailable
-        self.strainScoreState = st > 0 ? .computed(st) : .unavailable
+        self.recoveryScoreState = r > 0 ? .computed(r) : .unavailable(reason: "No data for selected date")
+        self.sleepScoreState = s > 0 ? .computed(s) : .unavailable(reason: "No data for selected date")
+        self.strainScoreState = st > 0 ? .computed(st) : .unavailable(reason: "No data for selected date")
         self.updateCoachingMessage()
     }
     

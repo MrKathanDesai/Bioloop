@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct CoreRingsSection: View {
-    let recoveryState: HomeViewModel.ScoreState
-    let sleepState: HomeViewModel.ScoreState
-    let strainState: HomeViewModel.ScoreState
+    let recoveryState: ScoreState
+    let sleepState: ScoreState
+    let strainState: ScoreState
     let coachingMessage: CoachingMessage?
     
     var body: some View {
@@ -62,7 +62,7 @@ struct CoreRingsSection: View {
 }
 
 private struct RingView: View {
-    let state: HomeViewModel.ScoreState
+    let state: ScoreState
     let color: Color
     let size: CGFloat = 80
     
@@ -77,13 +77,21 @@ private struct RingView: View {
                     .progressViewStyle(.circular)
                     .tint(.gray)
             }
-        case .unavailable:
+        case .unavailable(let reason):
             ZStack {
                 Circle()
                     .stroke(Color.gray.opacity(0.2), lineWidth: 8)
                     .frame(width: size, height: size)
-                Image(systemName: "slash.circle")
-                    .foregroundColor(.gray)
+                VStack(spacing: 2) {
+                    Image(systemName: "slash.circle")
+                        .foregroundColor(.gray)
+                    if let reason = reason {
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                    }
+                }
             }
         case .computed(let value):
             ZStack {
@@ -108,7 +116,7 @@ struct CoreRingsSection_Previews: PreviewProvider {
         CoreRingsSection(
             recoveryState: .computed(95),
             sleepState: .pending,
-            strainState: .unavailable,
+            strainState: .unavailable(reason: "No recent data"),
             coachingMessage: CoachingMessage(
                 message: "Excellent recovery! Target a Strain level of 24% - 62% for optimal training today.",
                 type: .recovery,
